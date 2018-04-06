@@ -16,6 +16,7 @@ class Processor(object):
         self.system = []
         self.gold = []
         self.amr_loads = partial(penman.loads, model=xmrs.Dmrs)
+        self.out_dir = argparse_ns.out_dir
         self.parse_mrs(argparse_ns.ace)
         self.parse_system(argparse_ns.system)
         self.parse_gold(argparse_ns.gold)
@@ -32,21 +33,23 @@ class Processor(object):
             }
             if 'mrs' in self.mrs[i]:
                 result["results"].append(
-                    {"result-id": readings,
+                    {"result-id": "ACE MRS",
                      "mrs": xmrs.Mrs.to_dict(self.mrs[i]['mrs'], properties=True)})
                 readings += 1
             if 'dmrs' in self.gold[i]:
                 result["results"].append(
-                    {"result-id": readings,
+                    {"result-id": "Gold DMRS (convert from penman)",
                      "dmrs": xmrs.Dmrs.to_dict(self.gold[i]['dmrs'], properties=True)})
                 readings += 1
             if 'dmrs' in self.system[i]:
                 result["results"].append(
-                    {"result-id": readings,
-                     "dmrs": xmrs.Dmrs.to_dict(self.gold[i]['dmrs'], properties=True)})
+                    {"result-id": "System DMRS (convert from penman)",
+                     "dmrs": xmrs.Dmrs.to_dict(self.system[i]['dmrs'], properties=True)})
                 readings += 1
-            result["readings"] = readings + 1
-            print json.dumps(result, indent=None)
+            result["readings"] = readings
+            file_outpath = os.path.join(self.out_dir, "n%s.json" % i)
+            with open(file_outpath, "w") as f:
+                f.write(json.dumps(result, indent=None))
 
 
     def convert_mrs(self, mrs, properties=True, indent=None):
@@ -79,8 +82,6 @@ class Processor(object):
         CLS = xmrs.Dmrs
         amr_string = "\n".join(lines)
         amr_string = amr_string.replace("|", "-")
-
-        #amr_string = amr_string.replace("_rel ", " ")
         try:
             xs = self.amr_loads(amr_string.strip())
             x = CLS.from_xmrs(xs[0])
@@ -118,37 +119,16 @@ class Processor(object):
 def process_main(ns):
     p = Processor(ns)
     print len(p.mrs), len(p.gold), len(p.system)
-#
-# def process_mrs(mrs, properties=True, indent=None):
-#     CLS = xmrs.Mrs
-#     # CLS = partial(penman.dumps, model=xmrs.Dmrs)
-#     sent = mrs[0]
-#     sent_prefix_len = len("SENT: ")
-#     sent_mrs = mrs[1:]
-#     mrs_string = " ".join(sent_mrs)
-#     xs = simplemrs.loads_one(mrs_string)
-#
-#     mrs_result = {
-#         "result-id": 0,
-#         "mrs": CLS.to_dict((xs if isinstance(xs, CLS) else CLS.from_xmrs(xs)), properties=properties),
-#     }
-#     result = {
-#         "readings": 1,
-#         "input": sent[sent_prefix_len:],
-#         "results": [mrs_result]
-#     }
-#     print mrs_result
-#     print json.dumps(result, indent=indent);
 
 def main(args=sys.argv[1:]):
     parser = argparse.ArgumentParser(prog=sys.argv[0])
     parser.add_argument('--system', type=argparse.FileType('r'),
-            default="../error-analysis-data/dev.system.dmrs.amr")
+            default="../../error-analysis-data/dev.system.dmrs.amr")
     parser.add_argument('--gold', type=argparse.FileType('r'),
-            default="../error-analysis-data/dev.gold.dmrs.amr")
+            default="../../error-analysis-data/dev.gold.dmrs.amr")
     parser.add_argument('--ace', type=argparse.FileType('r'),
-            default="../error-analysis-data/dev.erg.mrs")
-
+            default="../../error-analysis-data/dev.erg.mrs")
+    parser.add_argument('--out_dir', type=str, default="../webpage/data/")
     process_main(parser.parse_args(args))
 
 

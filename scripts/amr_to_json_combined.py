@@ -15,25 +15,53 @@ class Processor(object):
         self.mrs = []
         self.system = []
         self.gold = []
-        self.sentence = []
         self.amr_loads = partial(penman.loads, model=xmrs.Dmrs)
         self.parse_mrs(argparse_ns.ace)
         self.parse_system(argparse_ns.system)
         self.parse_gold(argparse_ns.gold)
+        self.to_json()
+
+    def to_json(self):
+        assert(len(self.mrs) == len(self.system))
+        assert(len(self.mrs) == len(self.gold))
+        for i in range(len(self.mrs)):
+            readings = 0
+            result = {
+                "input" : self.mrs[i]['sentence'],
+                "results" : [],
+            }
+            if 'mrs' in self.mrs[i]:
+                result["results"].append(
+                    {"result-id": readings,
+                     "mrs": xmrs.Mrs.to_dict(self.mrs[i]['mrs'], properties=True)})
+                readings += 1
+            if 'dmrs' in self.gold[i]:
+                result["results"].append(
+                    {"result-id": readings,
+                     "dmrs": xmrs.Dmrs.to_dict(self.gold[i]['dmrs'], properties=True)})
+                readings += 1
+            if 'dmrs' in self.system[i]:
+                result["results"].append(
+                    {"result-id": readings,
+                     "dmrs": xmrs.Dmrs.to_dict(self.gold[i]['dmrs'], properties=True)})
+                readings += 1
+            result["readings"] = readings + 1
+            print json.dumps(result, indent=None)
+
 
     def convert_mrs(self, mrs, properties=True, indent=None):
-        CLS = xmrs.Mrs
-        # CLS = partial(penman.dumps, model=xmrs.Dmrs)
-        sent = mrs[0]
-        sent_prefix_len = len("SENT: ")
-        sent_mrs = mrs[1:]
-        mrs_string = " ".join(sent_mrs)
-        self.sentence.append(sent[sent_prefix_len:])
-        xs = simplemrs.loads_one(mrs_string)
-        if isinstance(xs, CLS):
-            self.mrs.append(xs)
+        if len(mrs) == 1:
+            self.mrs.append({'sentence': mrs[0][len("SKIP: "):]})
         else:
-            self.mrs.append(CLS.from_xmrs(xs))
+            CLS = xmrs.Mrs
+            # CLS = partial(penman.dumps, model=xmrs.Dmrs)
+            sent = mrs[0]
+            xs = simplemrs.loads_one(" ".join(mrs[1:]))
+            if isinstance(xs, CLS):
+                x = xs
+            else:
+                x = CLS.from_xmrs(xs)
+            self.mrs.append({'sentence': sent[len("SENT: "):], 'mrs': x})
 
     def parse_mrs(self, input):
         mrs = []
@@ -41,9 +69,6 @@ class Processor(object):
             line = line.strip()
             if len(line) == 0:
                 if len(mrs) == 0: continue
-                if len(mrs) == 1:
-                    mrs = []
-                    continue
                 self.convert_mrs(mrs)
                 mrs = []
                 continue
@@ -51,16 +76,18 @@ class Processor(object):
 
 
     def convert_amr(self, lines):
-        CLS = xmrs.Mrs
+        CLS = xmrs.Dmrs
         amr_string = "\n".join(lines)
         amr_string = amr_string.replace("|", "-")
-        amr_string = amr_string.replace("_rel ", " ")
+
+        #amr_string = amr_string.replace("_rel ", " ")
         try:
             xs = self.amr_loads(amr_string.strip())
-            return CLS.from_xmrs(xs[0])
+            x = CLS.from_xmrs(xs[0])
+            return {'amr': amr_string, 'dmrs':x}
         except:
             print "FAILED: ", amr_string
-        return None
+        return {'amr': amr_string}
 
     def parse_amr_file(self, input):
         out_list = []
@@ -90,7 +117,7 @@ class Processor(object):
 
 def process_main(ns):
     p = Processor(ns)
-    print len(p.mrs), len(p.sentence), len(p.gold), len(p.system)
+    print len(p.mrs), len(p.gold), len(p.system)
 #
 # def process_mrs(mrs, properties=True, indent=None):
 #     CLS = xmrs.Mrs

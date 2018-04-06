@@ -106,3 +106,12 @@ graph = graphs[0]
 tri = []
 for t in graph.to_triples():
     print t
+
+
+# compare to wrong type of predicates
+# suface.smi
+# label and type of arg
+#   arg link to predicate with wrong type
+#   arg NEQ/EQ post labels
+#       scope
+#   too many args

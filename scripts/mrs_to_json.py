@@ -5,11 +5,14 @@ import sys
 import json
 import argparse
 
+from functools import partial
+
 from delphin.codecs import simplemrs
-from delphin.mrs import xmrs, eds
+from delphin.mrs import xmrs, eds, penman
 
 def process_mrs(mrs, properties=True, indent=None):
     CLS = xmrs.Mrs
+    # CLS = partial(penman.dumps, model=xmrs.Dmrs)
     sent = mrs[0]
     sent_prefix_len = len("SENT: ")
     sent_mrs = mrs[1:]
@@ -25,6 +28,7 @@ def process_mrs(mrs, properties=True, indent=None):
         "input": sent[sent_prefix_len:],
         "results": [mrs_result]
     }
+    print mrs_result
     print json.dumps(result, indent=indent);
 
 def process_file(ns):

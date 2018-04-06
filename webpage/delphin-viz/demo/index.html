@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset=utf-8 />
+        <title>Demo (delphin-viz)</title>
+	<link rel="icon" 
+	      type="image/png" 
+	      href="img/delphin.png" />
+        <link rel="stylesheet" type="text/css" media="screen" href="demo.css"/>
+        <link rel="stylesheet" type="text/css" media="screen" href="../viz/delphin-viz.css"/>
+        <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
+        <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
+        <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.3/lodash.min.js"></script>
+        <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/svg.js/2.3.6/svg.min.js"></script>
+        <script src="https://d3js.org/d3.v3.min.js" charset="utf-8"></script>
+        <script type="text/javascript" src="resources.js"></script>
+        <script type="text/javascript" src="demo.js"></script>
+        <script type="text/javascript" src="../viz/tree.js"></script>
+        <script type="text/javascript" src="../viz/mrs.js"></script>
+        <script type="text/javascript" src="../viz/dmrs.js"></script>
+    </head>
+    <body>
+        <div id="container">
+            <div id="input-container">
+                <p>A tool for visualising parse trees produced by <a href="http://www.delph-in.net/">DELPH-IN</a> grammars.
+                   Targets the developmental <a href="http://moin.delph-in.net/ErgApi">API</a>.
+                   The source code can be found on <a href="https://github.com/ned2/delphin-viz">GitHub</a>.</p>
+                <form action="#" method="post" onsubmit="return false;">
+                    <div class="input-line">
+                        <input id="input-text" type="text" value="Abrams knew that it rained.">
+                        <input id="input-submit" type="submit" value="Parse">
+                    </div>
+                    <div class="input-line">
+                        Grammar:
+                        <select id="input-grammar">
+                        </select>
+                        Results:
+                        <select id="input-results">
+                            <option value="1">1</option>
+                            <option value="5" selected="">5</option>
+                            <option value="10">10</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                            <option value="500">500</option>
+                        </select>
+                        Tree
+                        <input id="input-tree" type="checkbox">;
+                        MRS
+                        <input id="input-mrs" type="checkbox">;
+                        DMRS
+                        <input id="input-dmrs" type="checkbox">;
+			Dev
+			<input id="input-dev" type="checkbox">; 
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div id="results-info"></div>
+        <div id="results-container"></div>
+        <div id="tooltip" class="tooltip"></div>
+    </body>
+</html>
+    
+    

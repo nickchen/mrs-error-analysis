@@ -9,6 +9,9 @@ Project to satisfy the graduation requirement for CLMS at University of Washingt
 ## See Also
 
 * [DELPH-IN] http://moin.delph-in.net
+* [ERS Essence] http://moin.delph-in.net/ErgSemantics/Essence
+* [MRS] http://lingo.stanford.edu/sag/papers/copestake.pdf
+* [Robust Incremental Neural Semantic Graph Parsing] http://aclweb.org/anthology/P/P17/P17-1112.pdf
 
 ## Built With
 

@@ -20,7 +20,6 @@ class Processor(object):
         self.parse_mrs(argparse_ns.ace)
         self.parse_system(argparse_ns.system)
         self.parse_gold(argparse_ns.gold)
-        self.to_json()
 
     def to_json(self):
         assert(len(self.mrs) == len(self.system))
@@ -115,9 +114,17 @@ class Processor(object):
     def parse_system(self, input):
         self.system = self.parse_amr_file(input)
 
-
 def process_main(ns):
     p = Processor(ns)
+
+def process_main_error(ns):
+    p = Processor(ns)
+    p.to_json()
+
+def process_main_json(ns):
+    p = Processor(ns)
+    p.to_json()
+
     print len(p.mrs), len(p.gold), len(p.system)
 
 def main(args=sys.argv[1:]):
@@ -128,8 +135,19 @@ def main(args=sys.argv[1:]):
             default="../../error-analysis-data/dev.gold.dmrs.amr")
     parser.add_argument('--ace', type=argparse.FileType('r'),
             default="../../error-analysis-data/dev.erg.mrs")
-    parser.add_argument('--out_dir', type=str, default="../webpage/data/")
-    process_main(parser.parse_args(args))
+    subparsers = parser.add_subparsers()
+
+    parser_json = subparsers.add_parser("json")
+    parser_json.add_argument('--out_dir', type=str, default="../webpage/data/")
+    parser_json.set_defaults(func=process_main_json)
+
+    parser_error = subparsers.add_parser("error")
+    parser_error.add_argument('--out_dir', type=str, default="../webpage/data/")
+    parser_error.set_defaults(func=process_main_error)
+
+    parser.set_defaults(func=process_main)
+    ns = parser.parse_args(args)
+    ns.func(ns)
 
 
 if __name__ == "__main__":

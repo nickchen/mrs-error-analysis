@@ -1,3 +1,4 @@
 webpage/data/*
+webpage/data_*/*
 webpage/bootstrap*
 webpage/.DS_Store

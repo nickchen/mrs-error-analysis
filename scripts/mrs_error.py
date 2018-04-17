@@ -4,24 +4,32 @@ import os
 import sys
 import json
 import argparse
+import penman as PM
 
 from functools import partial
 
 from delphin.codecs import simplemrs
 from delphin.mrs import xmrs, eds, penman
 
+
 class Processor(object):
     def __init__(self, argparse_ns):
         self.mrs = []
         self.system = []
         self.gold = []
-        self.amr_loads = partial(penman.loads, model=xmrs.Dmrs)
+        self._package_amr_loads = partial(penman.loads, model=xmrs.Dmrs)
+        self.amr_loads = self._local_amr_loads
         self.out_dir = argparse_ns.out_dir
         self.parse_mrs(argparse_ns.ace)
         self.parse_system(argparse_ns.system)
         self.parse_gold(argparse_ns.gold)
 
-    def to_json(self):
+    def _local_amr_loads(self, s):
+        graphs = PM.loads(s, cls=penman.XMRSCodec)
+        xs = [xmrs.Dmrs.from_triples(g.triples()) for g in graphs]
+        return xs
+
+    def to_json(self, indent=2):
         assert(len(self.mrs) == len(self.system))
         assert(len(self.mrs) == len(self.gold))
         for i in range(len(self.mrs)):
@@ -48,7 +56,7 @@ class Processor(object):
             result["readings"] = readings
             file_outpath = os.path.join(self.out_dir, "n%s.json" % i)
             with open(file_outpath, "w") as f:
-                f.write(json.dumps(result, indent=None))
+                f.write(json.dumps(result, indent=indent))
 
 
     def convert_mrs(self, mrs, properties=True, indent=None):
@@ -85,8 +93,9 @@ class Processor(object):
             xs = self.amr_loads(amr_string.strip())
             x = CLS.from_xmrs(xs[0])
             return {'amr': amr_string, 'dmrs':x}
-        except:
+        except Exception as e:
             print "FAILED: ", amr_string
+            print e
         return {'amr': amr_string}
 
     def parse_amr_file(self, input):

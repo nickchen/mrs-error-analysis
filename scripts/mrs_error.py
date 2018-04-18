@@ -5,31 +5,101 @@ import sys
 import json
 import argparse
 import penman as PM
+import traceback
 
+from collections import defaultdict
 from functools import partial
 
 from delphin.codecs import simplemrs
 from delphin.mrs import xmrs, eds, penman
 
+class ErgArg(object):
+    def __init__(self):
+        self._predicate = None
+        self._args = defaultdict(list)
+    def parse_args(self, predicate, args):
+        args = [arg.strip() for arg in args.split("ARG")]
+        assert args[0] == "", "first arg empty"
+        arg = ErgArg.construct(args[1:])
+        self._predicate = predicate
+        self._args[arg.arg_index].append(arg)
+
+    @staticmethod
+    def construct(arg_array):
+        if len(arg_array) == 0:
+            return None
+        first = arg_array[0]
+        # print first, arg_array
+        id = first.index(" ")
+        arg = ErgArg()
+        arg.arg_index = first[0:id]
+        arg.arg_attribute = first[id:]
+        child = ErgArg.construct(arg_array[1:])
+        if child is not None:
+            arg._args[child.arg_index].append(child)
+        return arg
+
+
+
+class Erg(object):
+    def __init__(self, input):
+        self._tree = defaultdict(ErgArg)
+        self.parse(input)
+    def parse(self, input):
+        head = input.next()
+        input.next()
+        self._counts = defaultdict(int)
+        for line in input:
+            (predicate, args) = line.strip().split(":")
+            predicate = predicate.strip()
+            args = args.strip()
+            self._tree[predicate].parse_args(predicate, args)
+            self._counts[predicate] += 1
 
 class Processor(object):
     def __init__(self, argparse_ns):
+        self.__package_amr_loads = partial(penman.loads, model=xmrs.Dmrs)
         self.mrs = []
         self.system = []
         self.gold = []
-        self._package_amr_loads = partial(penman.loads, model=xmrs.Dmrs)
+        self.out_dir = None
+        self._files = {}
+        self.erg = None
         self.amr_loads = self._local_amr_loads
-        self.out_dir = argparse_ns.out_dir
-        self.parse_mrs(argparse_ns.ace)
-        self.parse_system(argparse_ns.system)
-        self.parse_gold(argparse_ns.gold)
+        if hasattr(argparse_ns, "out_dir"):
+            self.out_dir = argparse_ns.out_dir
+        for f in ("ace", "system", "gold", "erg"):
+            if hasattr(argparse_ns, f):
+                self._files[f] = getattr(argparse_ns, f)
+
+    def _package_amr_loads(self, s):
+        xs = self.__package_amr_loads(s)
+        return xs[0]
 
     def _local_amr_loads(self, s):
         graphs = PM.loads(s, cls=penman.XMRSCodec)
-        xs = [xmrs.Dmrs.from_triples(g.triples()) for g in graphs]
-        return xs
+        assert len(graphs) == 1, "only one graph"
+        triples = graphs[0].triples()
+        # triples = sorted(triples, key=lambda a: a.source)
+        try:
+            return xmrs.Dmrs.from_triples(triples)
+        except Exception as e:
+            raise
+
+    def load_json(self):
+        self.parse_mrs(self._files["ace"])
+        self.parse_system(self._files["system"])
+        self.parse_gold(self._files["gold"])
+
+    def parse_erg(self, input):
+        self.erg = Erg(input)
+
+    def analyze(self):
+        self.parse_erg(self._files["erg"])
+
 
     def to_json(self, indent=2):
+        self.load_json()
         assert(len(self.mrs) == len(self.system))
         assert(len(self.mrs) == len(self.gold))
         for i in range(len(self.mrs)):
@@ -63,14 +133,13 @@ class Processor(object):
         if len(mrs) == 1:
             self.mrs.append({'sentence': mrs[0][len("SKIP: "):]})
         else:
-            CLS = xmrs.Mrs
             # CLS = partial(penman.dumps, model=xmrs.Dmrs)
             sent = mrs[0]
             xs = simplemrs.loads_one(" ".join(mrs[1:]))
-            if isinstance(xs, CLS):
+            if isinstance(xs, xmrs.Mrs):
                 x = xs
             else:
-                x = CLS.from_xmrs(xs)
+                x = xmrs.Mrs.from_xmrs(xs)
             self.mrs.append({'sentence': sent[len("SENT: "):], 'mrs': x})
 
     def parse_mrs(self, input):
@@ -86,16 +155,15 @@ class Processor(object):
 
 
     def convert_amr(self, lines):
-        CLS = xmrs.Dmrs
         amr_string = "\n".join(lines)
         amr_string = amr_string.replace("|", "-")
         try:
-            xs = self.amr_loads(amr_string.strip())
-            x = CLS.from_xmrs(xs[0])
+            xmrs_obj = self.amr_loads(amr_string.strip())
+            x = xmrs.Dmrs.from_xmrs(xmrs_obj)
             return {'amr': amr_string, 'dmrs':x}
         except Exception as e:
-            print "FAILED: ", amr_string
-            print e
+            traceback.print_exc()
+
         return {'amr': amr_string}
 
     def parse_amr_file(self, input):
@@ -119,22 +187,26 @@ class Processor(object):
 
     def parse_gold(self, input):
         self.gold = self.parse_amr_file(input)
+        self.gold_error = len([s for s in self.system if s.get('dmrs') is None])
 
     def parse_system(self, input):
         self.system = self.parse_amr_file(input)
+        self.system_error = len([s for s in self.system if s.get('dmrs') is None])
 
 def process_main(ns):
     p = Processor(ns)
 
 def process_main_error(ns):
     p = Processor(ns)
-    p.to_json()
+    p.analyze()
 
 def process_main_json(ns):
     p = Processor(ns)
     p.to_json()
-
-    print len(p.mrs), len(p.gold), len(p.system)
+    print "total: %d gold: {%d/%d} system: {%d/%d}" % (
+        len(p.mrs),
+        len(p.gold), p.gold_error,
+        len(p.system), p.system_error)
 
 def main(args=sys.argv[1:]):
     parser = argparse.ArgumentParser(prog=sys.argv[0])
@@ -151,7 +223,8 @@ def main(args=sys.argv[1:]):
     parser_json.set_defaults(func=process_main_json)
 
     parser_error = subparsers.add_parser("error")
-    parser_error.add_argument('--out_dir', type=str, default="../webpage/data/")
+    parser.add_argument('--erg', type=argparse.FileType('r'),
+            default="../../erg1214/etc/surface.smi")
     parser_error.set_defaults(func=process_main_error)
 
     parser.set_defaults(func=process_main)

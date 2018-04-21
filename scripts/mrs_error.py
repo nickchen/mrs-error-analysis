@@ -81,15 +81,33 @@ class EdmContainer(object):
                     (start, end) = index.split(":")
                     self._entries[index] = EdmPredicate(start, end, self._sentence)
                 self._entries[index].append(typevalue)
-
+    def compare(self, other):
+        self_set = set([k for k in self._entries.iterkeys()])
+        other_set = set([k for k in other._entries.iterkeys()])
+        diff_set = self_set ^ other_set
+        diff_entries = defaultdict(dict)
+        for index in self_set & other_set:
+            i_self_set = set([k for k in self._entries[index].predicates])
+            i_other_set = set([k for k in other._entries[index].predicates])
+            diff = i_self_set - i_other_set
+            if len(diff) > 0:
+                diff_entries[index]['self'] = diff
+            diff = i_other_set - i_self_set
+            if len(diff) > 0:
+                diff_entries[index]['other'] = diff
+        for index in self_set - other_set:
+                diff_entries[index]['self'] = set([k for k in self._entries[index].predicates])
+        for index in other_set - self_set:
+                diff_entries[index]['other'] = set([k for k in other._entries[index].predicates])
+        return diff_entries
 
 class Processor(object):
     def __init__(self, argparse_ns):
         self.__package_amr_loads = partial(penman.loads, model=xmrs.Dmrs)
         self.mrs = []
-        self.system = []
         self.gold = []
         self._gold_edm = {}
+        self.system = []
         self._system_edm = {}
         self.out_dir = None
         self._files = {}
@@ -124,11 +142,13 @@ class Processor(object):
             e.parse(line)
             ret.append(e)
             i += 1
+        return ret
 
     def load_edm(self):
         self.parse_mrs(self._files["ace"])
         self.parse_edm_gold(self._files["gold"])
         self.parse_edm_system(self._files["system"])
+
 
     def load_json(self):
         self.parse_mrs(self._files["ace"])
@@ -243,6 +263,13 @@ class Processor(object):
         self.system = self.parse_amr_file(input)
         self.system_error = len([s for s in self.system if s.get('dmrs') is None])
 
+    def compare_edm(self):
+        assert len(self._gold_edm) == len(self._system_edm), "same edm numbers"
+        for i in range(len(self._gold_edm)):
+            d = self._gold_edm[i].compare(self._system_edm[i])
+            if len(d) > 0:
+                print d
+
 def process_main(ns):
     p = Processor(ns)
 
@@ -253,6 +280,7 @@ def process_main_error(ns):
 def process_main_edm(ns):
     p = Processor(ns)
     p.load_edm()
+    p.compare_edm()
 
 def process_main_json(ns):
     p = Processor(ns)

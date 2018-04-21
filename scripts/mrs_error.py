@@ -56,12 +56,41 @@ class Erg(object):
             self._tree[predicate].parse_args(predicate, args)
             self._counts[predicate] += 1
 
+class EdmPredicate(object):
+    def __init__(self, start, end, sentence):
+        self.start  = int(start)
+        self.end = int(end)
+        self.len = self.end - self.start
+        self.span = sentence[self.start:self.end]
+        self.predicates = []
+    def append(self, predicate):
+        self.predicates.append(predicate)
+
+class EdmContainer(object):
+    def __init__(self, sentence):
+        self._sentence = sentence
+        self._entries = {}
+
+    def parse(self, line):
+        for item in line.split(";"):
+            if len(item.strip()) == 0:
+                continue
+            (index, typename, typevalue) = item.strip().split(" ")
+            if typename == "NAME":
+                if index not in self._entries:
+                    (start, end) = index.split(":")
+                    self._entries[index] = EdmPredicate(start, end, self._sentence)
+                self._entries[index].append(typevalue)
+
+
 class Processor(object):
     def __init__(self, argparse_ns):
         self.__package_amr_loads = partial(penman.loads, model=xmrs.Dmrs)
         self.mrs = []
         self.system = []
         self.gold = []
+        self._gold_edm = {}
+        self._system_edm = {}
         self.out_dir = None
         self._files = {}
         self.erg = None
@@ -86,10 +115,25 @@ class Processor(object):
         except Exception as e:
             raise
 
+    def parse_edm_file(self, input):
+        assert len(self.mrs) > 0, "MRS parsed already"
+        ret = []
+        i = 0
+        for line in input:
+            e = EdmContainer(self.mrs[i].get('sentence'))
+            e.parse(line)
+            ret.append(e)
+            i += 1
+
+    def load_edm(self):
+        self.parse_mrs(self._files["ace"])
+        self.parse_edm_gold(self._files["gold"])
+        self.parse_edm_system(self._files["system"])
+
     def load_json(self):
         self.parse_mrs(self._files["ace"])
-        self.parse_system(self._files["system"])
-        self.parse_gold(self._files["gold"])
+        self.parse_amr_system(self._files["system"])
+        self.parse_amr_gold(self._files["gold"])
 
     def parse_erg(self, input):
         self.erg = Erg(input)
@@ -185,11 +229,17 @@ class Processor(object):
                 out_list.append(amr)
         return out_list
 
-    def parse_gold(self, input):
+    def parse_edm_gold(self, input):
+        self._gold_edm = self.parse_edm_file(input)
+
+    def parse_edm_system(self, input):
+        self._system_edm = self.parse_edm_file(input)
+
+    def parse_amr_gold(self, input):
         self.gold = self.parse_amr_file(input)
         self.gold_error = len([s for s in self.system if s.get('dmrs') is None])
 
-    def parse_system(self, input):
+    def parse_amr_system(self, input):
         self.system = self.parse_amr_file(input)
         self.system_error = len([s for s in self.system if s.get('dmrs') is None])
 
@@ -199,6 +249,10 @@ def process_main(ns):
 def process_main_error(ns):
     p = Processor(ns)
     p.analyze()
+
+def process_main_edm(ns):
+    p = Processor(ns)
+    p.load_edm()
 
 def process_main_json(ns):
     p = Processor(ns)
@@ -210,22 +264,29 @@ def process_main_json(ns):
 
 def main(args=sys.argv[1:]):
     parser = argparse.ArgumentParser(prog=sys.argv[0])
-    parser.add_argument('--system', type=argparse.FileType('r'),
-            default="../../error-analysis-data/dev.system.dmrs.amr")
-    parser.add_argument('--gold', type=argparse.FileType('r'),
-            default="../../error-analysis-data/dev.gold.dmrs.amr")
     parser.add_argument('--ace', type=argparse.FileType('r'),
             default="../../error-analysis-data/dev.erg.mrs")
     subparsers = parser.add_subparsers()
 
     parser_json = subparsers.add_parser("json")
+    parser_json.add_argument('--system', type=argparse.FileType('r'),
+            default="../../error-analysis-data/dev.system.dmrs.amr")
+    parser_json.add_argument('--gold', type=argparse.FileType('r'),
+            default="../../error-analysis-data/dev.gold.dmrs.amr")
     parser_json.add_argument('--out_dir', type=str, default="../webpage/data/")
     parser_json.set_defaults(func=process_main_json)
 
     parser_error = subparsers.add_parser("error")
-    parser.add_argument('--erg', type=argparse.FileType('r'),
+    parser_error.add_argument('--erg', type=argparse.FileType('r'),
             default="../../erg1214/etc/surface.smi")
     parser_error.set_defaults(func=process_main_error)
+
+    parser_edm = subparsers.add_parser("edm")
+    parser_edm.add_argument('--gold', type=argparse.FileType('r'),
+            default="../../error-analysis-data/dev.gold.edm")
+    parser_edm.add_argument('--system', type=argparse.FileType('r'),
+            default="../../error-analysis-data/dev.system.dmrs.edm")
+    parser_edm.set_defaults(func=process_main_edm)
 
     parser.set_defaults(func=process_main)
     ns = parser.parse_args(args)

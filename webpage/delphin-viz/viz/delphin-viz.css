@@ -33,7 +33,11 @@
     width: 60%;
 }
 
-
+.edm {
+  display: inline-block;
+  background-color: #FFF;
+  border-radius: 10px;
+}
 
 /* DMRS specific */
 
@@ -61,7 +65,7 @@
 }
 
 .node.selected {
-  font-weight: bold;    
+  font-weight: bold;
 }
 
 .nodeBox {

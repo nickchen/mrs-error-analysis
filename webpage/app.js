@@ -7,7 +7,6 @@ function getCurrGrammar() {
     return RESOURCES[getCurrGramId()];
 }
 
-
 // Using underscore.js/lodash.js Templates
 var Templates = {};
 
@@ -29,12 +28,65 @@ Templates.viz = [
     '</div>'
 ].join("\n");
 
+Templates.edm = [
+    '<div name="test">',
+        '<table class="edm edm_table">',
+          '<tr>',
+            '<th>span</th>',
+            '<th>span string</th>',
+            '<th>gold predicates</th>',
+            '<th>system predicates</th>',
+          '</tr>',
+        '</table>',
+    '</div>'
+].join("\n");
+
+Templates.edm_entry = [
+    '<tr>',
+      '<td><%= span_start %>:<%= span_end %></td>',
+      '<td align="right"><%= span_text %></td>',
+      '<td><%= gold %></td>',
+      '<td><%= system %></td>',
+    '</tr>',
+].join("\n");
 
 Templates.successStatus = [
     '<p id="parse-status">Showing <%= numResults %> of <%= readings %> analyses.</p>',
     '<div id="text-input"><%= input %></div>'
 ].join("\n");
 
+function EDM(parentElement, edm) {
+  var self = {
+
+  };
+  var t = [];
+  $.each(edm, function(i, d) {
+    t.push(d);
+  });
+  t = t.sort(function(a, b) {
+    return b.len - a.len;
+  });
+  $.each(t, function(i, d) {
+    var gold = "",
+        system = "";
+    if (typeof d.predicate.gold !== 'undefined') {
+      gold = d.predicate.gold.join(",")
+    }
+    if (typeof d.predicate.system !== 'undefined') {
+      system = d.predicate.system.join(",")
+    }
+    $(parentElement).find("tr:last").after(
+      $(Templates.edm_entry({
+        span_start: d.start,
+        span_end: d.end,
+        span_text: d.span,
+        gold: gold,
+        system: system,
+      }))
+    );
+  });
+  return self;
+}
 
 // Precompile the templates
 for (var template in Templates) {
@@ -187,6 +239,10 @@ function Result(result, parent) {
     if (self.data.dmrs) {
         var $viz = $(Templates.viz({vizType:'dmrs'})).appendTo($inner);
         self.dmrs = DMRS($viz[0], self.data.dmrs);
+    }
+    if (self.data.edm) {
+        var $edm = $(Templates.edm()).appendTo($inner);
+        self.edm = EDM($edm, self.data.edm);
     }
 
     //Add various event bindings to things in the visualisations

@@ -128,6 +128,7 @@ class EdmContainer(object):
             d[key] = {
                 "start": pred.start,
                 "end": pred.end,
+                "len": (pred.end - pred.start),
                 "span": pred.span,
                 "predicates": list(set(pred.predicates))
             }
@@ -195,6 +196,25 @@ class Processor(object):
     def analyze(self):
         self.parse_erg(self._files["erg"])
 
+    def _edm_dict(self, gold, system):
+        gold_set = set([i for i in gold._entries.iterkeys()])
+        system_set = set([i for i in system._entries.iterkeys()])
+        d = {}
+        for index in list(gold_set | system_set):
+            pred = gold._entries[index] if index in gold._entries else system._entries[index]
+            d[index] = {
+                "start": pred.start,
+                "end": pred.end,
+                "len": (pred.end - pred.start),
+                "span": pred.span,
+                "predicate" : {}
+            }
+            if index in gold_set:
+                d[index]["predicate"]["gold"] = list(set(gold._entries[index].predicates))
+            if index in system_set:
+                d[index]["predicate"]["system"] = list(set(system._entries[index].predicates))
+        return d
+
 
     def to_json(self, indent=2):
         self.load_json()
@@ -221,10 +241,9 @@ class Processor(object):
                     {"result-id": "System DMRS (convert from penman)",
                      "dmrs": xmrs.Dmrs.to_dict(self.system[i]['dmrs'], properties=True)})
                 readings += 1
-            result["results"].append({"result-id": "Gold EDM", "edm": self._gold_edm[i].to_dict()})
-            readings += 1
-            result["results"].append({"result-id": "System EDM", "edm": self._system_edm[i].to_dict()})
-            readings += 1
+            if len(self._gold_edm) != 0 and len(self._gold_edm) == len(self._system_edm):
+                result["results"].append({"result-id": "EDM", "edm": self._edm_dict(self._gold_edm[i], self._system_edm[i])})
+                readings += 1
             result["readings"] = readings
             file_outpath = os.path.join(self.out_dir, "n%s.json" % i)
             with open(file_outpath, "w") as f:

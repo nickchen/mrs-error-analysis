@@ -64,16 +64,21 @@ class EdmPredicate(object):
         self.sentence = sentence
         self.span = sentence[self.start:self.end]
         self.predicates = []
+
     def append(self, predicate):
         self.predicates.append(predicate)
+
     def compare(self, other):
         d = EdmPredicateDiff(self.start, self.end, self.sentence)
         d._in_left = set(self.predicates) - set(other.predicates)
         d._in_right = set(other.predicates) - set(self.predicates)
-        return d
-    def as_diff(self):
+        if len(d._in_left) > 0 or len(d._in_right) > 0:
+            return d
+        return None
+
+    def as_diff(self, side="left"):
         d = EdmPredicateDiff(self.start, self.end, self.sentence)
-        d._in_left = self.predicates
+        setattr(d, "_in_%s" % (side), self.predicates)
         return d
 
 class EdmPredicateDiff(EdmPredicate):
@@ -81,6 +86,11 @@ class EdmPredicateDiff(EdmPredicate):
         super(EdmPredicateDiff, self).__init__(start, end, sentence)
         self._in_left = []
         self._in_right = []
+
+    def __repr__(self):
+        return "<%s> {left=[%s], right=[%s]}" % (self.span,
+                                                 ",".join(self._in_left),
+                                                 ",".join(self._in_right))
 
 
 class EdmContainer(object):
@@ -108,26 +118,36 @@ class EdmContainer(object):
             if diff is not None:
                 diff_entries[index] = diff
         for index in self_set - other_set:
-                diff_entries[index] = self._entries[index].as_diff()
+                diff_entries[index] = self._entries[index].as_diff(side="left")
         for index in other_set - self_set:
-                diff_entries[index] = other._entries[index].as_diff()
+                diff_entries[index] = other._entries[index].as_diff(side="right")
         return diff_entries
+    def to_dict(self):
+        d = {}
+        for key, pred in self._entries.iteritems():
+            d[key] = {
+                "start": pred.start,
+                "end": pred.end,
+                "span": pred.span,
+                "predicates": list(set(pred.predicates))
+            }
+        return d
 
 class Processor(object):
     def __init__(self, argparse_ns):
         self.__package_amr_loads = partial(penman.loads, model=xmrs.Dmrs)
         self.mrs = []
         self.gold = []
-        self._gold_edm = {}
+        self._gold_edm = []
         self.system = []
-        self._system_edm = {}
+        self._system_edm = []
         self.out_dir = None
         self._files = {}
         self.erg = None
         self.amr_loads = self._local_amr_loads
         if hasattr(argparse_ns, "out_dir"):
             self.out_dir = argparse_ns.out_dir
-        for f in ("ace", "system", "gold", "erg"):
+        for f in ("ace", "system", "gold", "erg", "system_edm", "gold_edm"):
             if hasattr(argparse_ns, f):
                 self._files[f] = getattr(argparse_ns, f)
 
@@ -158,14 +178,16 @@ class Processor(object):
 
     def load_edm(self):
         self.parse_mrs(self._files["ace"])
-        self.parse_edm_gold(self._files["gold"])
-        self.parse_edm_system(self._files["system"])
+        self.parse_edm_gold(self._files["gold_edm"])
+        self.parse_edm_system(self._files["system_edm"])
 
 
     def load_json(self):
         self.parse_mrs(self._files["ace"])
         self.parse_amr_system(self._files["system"])
         self.parse_amr_gold(self._files["gold"])
+        self.parse_edm_gold(self._files["gold_edm"])
+        self.parse_edm_system(self._files["system_edm"])
 
     def parse_erg(self, input):
         self.erg = Erg(input)
@@ -199,6 +221,10 @@ class Processor(object):
                     {"result-id": "System DMRS (convert from penman)",
                      "dmrs": xmrs.Dmrs.to_dict(self.system[i]['dmrs'], properties=True)})
                 readings += 1
+            result["results"].append({"result-id": "Gold EDM", "edm": self._gold_edm[i].to_dict()})
+            readings += 1
+            result["results"].append({"result-id": "System EDM", "edm": self._system_edm[i].to_dict()})
+            readings += 1
             result["readings"] = readings
             file_outpath = os.path.join(self.out_dir, "n%s.json" % i)
             with open(file_outpath, "w") as f:
@@ -292,7 +318,6 @@ def process_main_error(ns):
 def process_main_edm(ns):
     p = Processor(ns)
     p.load_edm()
-    p.compare_edm()
 
 def process_main_json(ns):
     p = Processor(ns)
@@ -313,6 +338,10 @@ def main(args=sys.argv[1:]):
             default="../../error-analysis-data/dev.system.dmrs.amr")
     parser_json.add_argument('--gold', type=argparse.FileType('r'),
             default="../../error-analysis-data/dev.gold.dmrs.amr")
+    parser_json.add_argument('--gold_edm', type=argparse.FileType('r'),
+            default="../../error-analysis-data/dev.gold.edm")
+    parser_json.add_argument('--system_edm', type=argparse.FileType('r'),
+            default="../../error-analysis-data/dev.system.dmrs.edm")
     parser_json.add_argument('--out_dir', type=str, default="../webpage/data/")
     parser_json.set_defaults(func=process_main_json)
 
@@ -322,9 +351,9 @@ def main(args=sys.argv[1:]):
     parser_error.set_defaults(func=process_main_error)
 
     parser_edm = subparsers.add_parser("edm")
-    parser_edm.add_argument('--gold', type=argparse.FileType('r'),
+    parser_edm.add_argument('--gold_edm', type=argparse.FileType('r'),
             default="../../error-analysis-data/dev.gold.edm")
-    parser_edm.add_argument('--system', type=argparse.FileType('r'),
+    parser_edm.add_argument('--system_edm', type=argparse.FileType('r'),
             default="../../error-analysis-data/dev.system.dmrs.edm")
     parser_edm.set_defaults(func=process_main_edm)
 

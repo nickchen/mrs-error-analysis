@@ -61,10 +61,27 @@ class EdmPredicate(object):
         self.start  = int(start)
         self.end = int(end)
         self.len = self.end - self.start
+        self.sentence = sentence
         self.span = sentence[self.start:self.end]
         self.predicates = []
     def append(self, predicate):
         self.predicates.append(predicate)
+    def compare(self, other):
+        d = EdmPredicateDiff(self.start, self.end, self.sentence)
+        d._in_left = set(self.predicates) - set(other.predicates)
+        d._in_right = set(other.predicates) - set(self.predicates)
+        return d
+    def as_diff(self):
+        d = EdmPredicateDiff(self.start, self.end, self.sentence)
+        d._in_left = self.predicates
+        return d
+
+class EdmPredicateDiff(EdmPredicate):
+    def __init__(self, start, end, sentence):
+        super(EdmPredicateDiff, self).__init__(start, end, sentence)
+        self._in_left = []
+        self._in_right = []
+
 
 class EdmContainer(object):
     def __init__(self, sentence):
@@ -87,18 +104,13 @@ class EdmContainer(object):
         diff_set = self_set ^ other_set
         diff_entries = defaultdict(dict)
         for index in self_set & other_set:
-            i_self_set = set([k for k in self._entries[index].predicates])
-            i_other_set = set([k for k in other._entries[index].predicates])
-            diff = i_self_set - i_other_set
-            if len(diff) > 0:
-                diff_entries[index]['self'] = diff
-            diff = i_other_set - i_self_set
-            if len(diff) > 0:
-                diff_entries[index]['other'] = diff
+            diff = self._entries[index].compare(other._entries[index])
+            if diff is not None:
+                diff_entries[index] = diff
         for index in self_set - other_set:
-                diff_entries[index]['self'] = set([k for k in self._entries[index].predicates])
+                diff_entries[index] = self._entries[index].as_diff()
         for index in other_set - self_set:
-                diff_entries[index]['other'] = set([k for k in other._entries[index].predicates])
+                diff_entries[index] = other._entries[index].as_diff()
         return diff_entries
 
 class Processor(object):

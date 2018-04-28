@@ -67,14 +67,7 @@ class EdmPredicate(object):
 
     def append(self, predicate):
         self.predicates.append(predicate)
-
-    def compare(self, other):
-        d = EdmPredicateDiff(self.start, self.end, self.sentence)
-        d._in_left = set(self.predicates) - set(other.predicates)
-        d._in_right = set(other.predicates) - set(self.predicates)
-        if len(d._in_left) > 0 or len(d._in_right) > 0:
-            return d
-        return None
+        self.predicates = sorted(self.predicates)
 
     def as_diff(self, side="left"):
         d = EdmPredicateDiff(self.start, self.end, self.sentence)
@@ -108,31 +101,21 @@ class EdmContainer(object):
                     (start, end) = index.split(":")
                     self._entries[index] = EdmPredicate(start, end, self._sentence)
                 self._entries[index].append(typevalue)
-    def compare(self, other):
-        self_set = set([k for k in self._entries.iterkeys()])
-        other_set = set([k for k in other._entries.iterkeys()])
-        diff_set = self_set ^ other_set
-        diff_entries = defaultdict(dict)
-        for index in self_set & other_set:
-            diff = self._entries[index].compare(other._entries[index])
-            if diff is not None:
-                diff_entries[index] = diff
-        for index in self_set - other_set:
-                diff_entries[index] = self._entries[index].as_diff(side="left")
-        for index in other_set - self_set:
-                diff_entries[index] = other._entries[index].as_diff(side="right")
-        return diff_entries
-    def to_dict(self):
-        d = {}
-        for key, pred in self._entries.iteritems():
-            d[key] = {
-                "start": pred.start,
-                "end": pred.end,
-                "len": (pred.end - pred.start),
-                "span": pred.span,
-                "predicates": list(set(pred.predicates))
-            }
-        return d
+
+    def align_with(self, other):
+        """Using self as the model, make the other align with self"""
+        for index, self_predicate in self._entries.iteritems():
+            if index not in other._entries and self_predicate.span.endswith("."):
+                # candidate for alignment fix
+                other_key = "%d:%d" % (self_predicate.start, self_predicate.end - 1)
+                if other_key in other._entries:
+                    other_predicate = other._entries[other_key]
+                    del other._entries[other_key]
+                    other._entries[index] = other_predicate
+                    other_predicate.start = self_predicate.start
+                    other_predicate.end = self_predicate.end
+                    other_predicate.span = self_predicate.span
+                    other_predicate.len = self_predicate.len
 
 class Processor(object):
     def __init__(self, argparse_ns):
@@ -177,18 +160,23 @@ class Processor(object):
             i += 1
         return ret
 
+    def align_edm(self):
+        assert len(self._gold_edm) == len(self._system_edm), "same length"
+        for i in range(len(self._gold_edm)):
+            self._gold_edm[i].align_with(self._system_edm[i])
+
     def load_edm(self):
-        self.parse_mrs(self._files["ace"])
+        if len(self.mrs) == 0:
+            self.parse_mrs(self._files["ace"])
         self.parse_edm_gold(self._files["gold_edm"])
         self.parse_edm_system(self._files["system_edm"])
-
+        self.align_edm()
 
     def load_json(self):
         self.parse_mrs(self._files["ace"])
+        self.load_edm()
         self.parse_amr_system(self._files["system"])
         self.parse_amr_gold(self._files["gold"])
-        self.parse_edm_gold(self._files["gold_edm"])
-        self.parse_edm_system(self._files["system_edm"])
 
     def parse_erg(self, input):
         self.erg = Erg(input)
@@ -320,12 +308,6 @@ class Processor(object):
         self.system = self.parse_amr_file(input)
         self.system_error = len([s for s in self.system if s.get('dmrs') is None])
 
-    def compare_edm(self):
-        assert len(self._gold_edm) == len(self._system_edm), "same edm numbers"
-        for i in range(len(self._gold_edm)):
-            d = self._gold_edm[i].compare(self._system_edm[i])
-            if len(d) > 0:
-                print d
 
 def process_main(ns):
     p = Processor(ns)

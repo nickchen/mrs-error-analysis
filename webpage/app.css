@@ -1,0 +1,15 @@
+.gold {
+    color: gold;
+}
+.system {
+    color: red;
+}
+.common, .gold, .system {
+  fill: #000;
+  stroke: none;
+  stroke-width: 1px;
+  font-family: sans-serif;
+  font-size: 10px;
+  padding-left: 1px;
+  padding-right: 1px;
+}

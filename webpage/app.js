@@ -30,6 +30,8 @@ Templates.viz = [
 
 Templates.edm = [
     '<div name="test">',
+      '<div><a href="#" id="edm_option" class="btn btn-primary btn-sm" role="button" aria-pressed="true"></a></div>',
+        '<div><span class="common">Common</span>/<span class="gold">Gold Only</span>/<span class="system">System Only</span></div>',
         '<table class="edm edm_table">',
           '<tr>',
             '<th>span</th>',
@@ -42,7 +44,7 @@ Templates.edm = [
 ].join("\n");
 
 Templates.edm_entry = [
-    '<tr>',
+    '<tr class="<%=span_class%>">',
       '<td><%= span_start %>:<%= span_end %></td>',
       '<td align="right"><%= span_text %></td>',
       '<td><%= gold %></td>',
@@ -68,12 +70,33 @@ function EDM(parentElement, edm) {
   });
   $.each(t, function(i, d) {
     var gold = "",
-        system = "";
+        system = "",
+        gold_set = new Set([]),
+        system_set = new Set([]);
     if (typeof d.predicate.gold !== 'undefined') {
-      gold = d.predicate.gold.join(",")
+      gold_set = new Set(d.predicate.gold);
     }
     if (typeof d.predicate.system !== 'undefined') {
-      system = d.predicate.system.join(",")
+      system_set = new Set(d.predicate.system);
+    }
+    var intersection = new Set([...gold_set].filter(x => system_set.has(x)));
+    var gold_unique = new Set([...gold_set].filter(x => !system_set.has(x)));
+    var system_unique = new Set([...system_set].filter(x => !gold_set.has(x)));
+    for (let item of intersection) {
+      gold += '<span class="common">' + item + '</span>';
+      system += '<span class="common">' + item + '</span>';
+    }
+    for (let item of gold_unique) {
+      gold += '<span class="gold">' + item + '</span>';
+    }
+    for (let item of system_unique) {
+      system += '<span class="system">' + item + '</span>';
+    }
+    span_class = "";
+    if (gold_unique.size === 0 && system_unique.size === 0) {
+      span_class = "common";
+    } else {
+      span_class = "unique";
     }
     $(parentElement).find("tr:last").after(
       $(Templates.edm_entry({
@@ -82,6 +105,7 @@ function EDM(parentElement, edm) {
         span_text: d.span,
         gold: gold,
         system: system,
+        span_class: span_class,
       }))
     );
   });
@@ -245,6 +269,7 @@ function Result(result, parent) {
         self.edm = EDM($edm, self.data.edm);
     }
 
+
     //Add various event bindings to things in the visualisations
     $result.find('.viz').hover(
         function(event) {
@@ -322,7 +347,7 @@ function doResults(data) {
 
 
 var MAX = 1769;
-function updateLinks(index) {
+function updateLinks(index, edm_diff_only) {
   var previous = parseInt(index) - 1;
   var next = parseInt(index) + 1;
   if (previous === -1) {
@@ -331,25 +356,50 @@ function updateLinks(index) {
   if (next === (MAX + 1)) {
       next = 0;
   }
+  href_common = "?edm_diff_only=";
+  if (edm_diff_only === false || edm_diff_only === "0") {
+    href_common += "0";
+  } else {
+    href_common += "1";
+  }
+
   $('a.page-link').each(function(l) {
+
       if ($(this).text() === "Previous") {
-        $(this).attr("href", "?index=" + previous.toString());
+        $(this).attr("href", href_common + "&index=" + previous.toString());
       } else if ($(this).text() === "Next") {
-        $(this).attr("href", "?index=" + next.toString());
+        $(this).attr("href", href_common + "&index=" + next.toString());
       } else {
         $(this).text(index.toString());
       }
   });
 }
 
+function edm_show(edm_diff_only, index) {
+    if (edm_diff_only === true) {
+        $("tr.common").removeClass('hidden');
+        $('#edm_option').text("Difference Only");
+        $('#edm_option').attr('href', "?edm_diff_only=1&index="+index);
+    } else {
+        $("tr.common").addClass('hidden');
+        $('#edm_option').text("Show All");
+        $('#edm_option').attr('href', "?edm_diff_only=0&index="+index);
+    }
+}
 $(document).ready(function(){
-    var index = getQueryVariable('index');
+    var index = getQueryVariable('index'),
+        edm_diff_only = getQueryVariable('edm_diff_only');
     if (index === false) {
         index = 0;
     }
-    updateLinks(index);
+    updateLinks(index, edm_diff_only);
     $.getJSON("./data/n" + index.toString() + ".json", function(data) {
         doResults(data);
+        if (edm_diff_only === false || edm_diff_only === 0 || edm_diff_only === "0") {
+            edm_show(true, index);
+        } else {
+            edm_show(false, index);
+        }
     });
 
     // add empty svg element for use in saving SVGs as SVGs and PNGs

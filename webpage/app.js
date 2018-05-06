@@ -171,7 +171,7 @@ function Result(result, parent) {
     var resultId = result['result-id'];
     var $path = window.location.pathname;
     var EDM_ONLY = false;
-    if ($path === "/edm.html") {
+    if ($path.endsWith("edm.html")) {
       EDM_ONLY = true;
     }
 

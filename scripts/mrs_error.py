@@ -17,6 +17,7 @@ class ErgArg(object):
     def __init__(self):
         self._predicate = None
         self._args = defaultdict(list)
+
     def parse_args(self, predicate, args):
         args = [arg.strip() for arg in args.split("ARG")]
         assert args[0] == "", "first arg empty"
@@ -187,21 +188,28 @@ class Processor(object):
     def _edm_dict(self, gold, system):
         gold_set = set([i for i in gold._entries.iterkeys()])
         system_set = set([i for i in system._entries.iterkeys()])
-        d = {}
+        predicates = {}
+        stats = defaultdict(int)
         for index in list(gold_set | system_set):
             pred = gold._entries[index] if index in gold._entries else system._entries[index]
-            d[index] = {
+            predicates[index] = {
                 "start": pred.start,
                 "end": pred.end,
                 "len": (pred.end - pred.start),
                 "span": pred.span,
                 "predicate" : {}
             }
-            if index in gold_set:
-                d[index]["predicate"]["gold"] = list(set(gold._entries[index].predicates))
-            if index in system_set:
-                d[index]["predicate"]["system"] = list(set(system._entries[index].predicates))
-        return d
+            gold_index_predicates = set(gold._entries[index].predicates) if index in gold_set else set()
+            system_index_predicates = set(system._entries[index].predicates) if index in system_set else set()
+            stats['total'] += len(system_index_predicates | gold_index_predicates)
+            stats['gold'] += len(gold_index_predicates - system_index_predicates)
+            stats['system'] += len(system_index_predicates - gold_index_predicates)
+            stats['common'] += len(system_index_predicates & gold_index_predicates)
+            if len(gold_index_predicates) > 0:
+                predicates[index]["predicate"]["gold"] = list(gold_index_predicates)
+            if len(system_index_predicates) > 0:
+                predicates[index]["predicate"]["system"] = list(system_index_predicates)
+        return {'predicates': predicates, 'stats': stats}
 
 
     def to_json(self, indent=2):

@@ -32,6 +32,12 @@ Templates.edm = [
     '<div name="test">',
       '<div><a href="#" id="edm_option" class="btn btn-primary btn-sm" role="button" aria-pressed="true"></a></div>',
         '<div><span class="common">Common</span>/<span class="gold">Gold Only</span>/<span class="system">System Only</span></div>',
+        '<div><table class="edm edm_table edm_stats">',
+          '<tr><td>Total</td><td><%= total %></td></tr>',
+          '<tr><td>Common </td><td><%= common %></td></tr>',
+          '<tr><td>Gold Unique</td><td><%= gold %></td></tr>',
+          '<tr><td>System Unique</td><td><%= system %></td></tr>',
+          '</table></div>',
         '<table class="edm edm_table">',
           '<tr>',
             '<th>span</th>',
@@ -58,17 +64,15 @@ Templates.successStatus = [
 ].join("\n");
 
 function EDM(parentElement, edm) {
-  var self = {
-
-  };
-  var t = [];
-  $.each(edm, function(i, d) {
-    t.push(d);
+  var self = { };
+  var predicates = [];
+  $.each(edm.predicates, function(i, d) {
+    predicates.push(d);
   });
-  t = t.sort(function(a, b) {
+  predicates = predicates.sort(function(a, b) {
     return b.len - a.len;
   });
-  $.each(t, function(i, d) {
+  $.each(predicates, function(i, d) {
     var gold = "",
         system = "",
         gold_set = new Set([]),
@@ -274,7 +278,11 @@ function Result(result, parent) {
         self.dmrs = DMRS($viz[0], self.data.dmrs);
     }
     if (self.data.edm) {
-        var $edm = $(Templates.edm()).appendTo($inner);
+        var $stat = self.data.edm.stats;
+        var $edm = $(Templates.edm({total: $stat.total,
+                                    gold: $stat.gold,
+                                    system: $stat.system,
+                                    common: $stat.common})).appendTo($inner);
         self.edm = EDM($edm, self.data.edm);
     }
 

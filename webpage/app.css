@@ -13,3 +13,9 @@
   padding-left: 1px;
   padding-right: 1px;
 }
+
+.edm_stats td {
+  text-align: left;
+  font-family: sans-serif;
+  font-size: 10px;
+}

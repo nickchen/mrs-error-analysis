@@ -169,6 +169,17 @@ function setInlineStyles(svg, emptySvgDeclarationComputed) {
 
 function Result(result, parent) {
     var resultId = result['result-id'];
+    var $path = window.location.pathname;
+    var EDM_ONLY = false;
+    if ($path === "/edm.html") {
+      EDM_ONLY = true;
+    }
+
+    if (EDM_ONLY) {
+      if (result.derivation || result.dmrs || result.mrs) {
+        return;
+      }
+    }
 
     // Create and attach the DOM element that will contain the Result
     var $result = $(Templates.result({'resultId': resultId})).appendTo(parent);
@@ -254,12 +265,10 @@ function Result(result, parent) {
         var $viz = $(Templates.viz({vizType:'tree'})).appendTo($inner);
         self.tree = {element: drawTree($viz[0], self.data.derivation)};
     }
-
     if (self.data.mrs) {
         var $viz = $(Templates.viz({vizType:'mrs'})).appendTo($inner);
         self.mrs = MRS($viz[0], self.data.mrs);
     }
-
     if (self.data.dmrs) {
         var $viz = $(Templates.viz({vizType:'dmrs'})).appendTo($inner);
         self.dmrs = DMRS($viz[0], self.data.dmrs);
@@ -315,7 +324,6 @@ function triggerDownload (uri, filename) {
 function getQueryVariable(variable) {
     var query = window.location.search.substring(1);
     var vars = query.split("&");
-
     for (var i=0;i<vars.length;i++) {
         var pair = vars[i].split("=");
         if (pair[0] == variable)
@@ -350,6 +358,7 @@ var MAX = 1769;
 function updateLinks(index, edm_diff_only) {
   var previous = parseInt(index) - 1;
   var next = parseInt(index) + 1;
+  var current = index;
   if (previous === -1) {
       previous = MAX;
   }
@@ -369,8 +378,10 @@ function updateLinks(index, edm_diff_only) {
         $(this).attr("href", href_common + "&index=" + previous.toString());
       } else if ($(this).text() === "Next") {
         $(this).attr("href", href_common + "&index=" + next.toString());
-      } else {
-        $(this).text(index.toString());
+      } else if ($(this).text() === "EDM") {
+        $(this).attr("href", "edm.html" + href_common + "&index=" + next.toString());
+      } else if ($(this).text() === "Everything") {
+        $(this).attr("href", "index.html" + href_common + "&index=" + next.toString());
       }
   });
 }

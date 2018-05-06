@@ -2,3 +2,6 @@ webpage/data/*
 webpage/data_*/*
 webpage/bootstrap*
 webpage/.DS_Store
+.DS_Store
+webpage/edm.html
+sync.sh

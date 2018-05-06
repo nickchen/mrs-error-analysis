@@ -379,9 +379,9 @@ function updateLinks(index, edm_diff_only) {
       } else if ($(this).text() === "Next") {
         $(this).attr("href", href_common + "&index=" + next.toString());
       } else if ($(this).text() === "EDM") {
-        $(this).attr("href", "edm.html" + href_common + "&index=" + next.toString());
+        $(this).attr("href", "edm.html" + href_common + "&index=" + current.toString());
       } else if ($(this).text() === "Everything") {
-        $(this).attr("href", "index.html" + href_common + "&index=" + next.toString());
+        $(this).attr("href", "index.html" + href_common + "&index=" + current.toString());
       }
   });
 }

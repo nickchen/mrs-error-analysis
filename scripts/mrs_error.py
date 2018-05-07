@@ -65,27 +65,18 @@ class EdmPredicate(object):
         self.sentence = sentence
         self.span = sentence[self.start:self.end]
         self.predicates = []
+        self.carg = []
+        self.args = []
 
     def append(self, predicate):
         self.predicates.append(predicate)
         self.predicates = sorted(self.predicates)
 
-    def as_diff(self, side="left"):
-        d = EdmPredicateDiff(self.start, self.end, self.sentence)
-        setattr(d, "_in_%s" % (side), self.predicates)
-        return d
+    def carg(self, value):
+        self.carg.append(value)
 
-class EdmPredicateDiff(EdmPredicate):
-    def __init__(self, start, end, sentence):
-        super(EdmPredicateDiff, self).__init__(start, end, sentence)
-        self._in_left = []
-        self._in_right = []
-
-    def __repr__(self):
-        return "<%s> {left=[%s], right=[%s]}" % (self.span,
-                                                 ",".join(self._in_left),
-                                                 ",".join(self._in_right))
-
+    def arg(self, name, value):
+        self.args.append({'name':name, 'index':value})
 
 class EdmContainer(object):
     def __init__(self, sentence):
@@ -97,11 +88,16 @@ class EdmContainer(object):
             if len(item.strip()) == 0:
                 continue
             (index, typename, typevalue) = item.strip().split(" ")
+            if index not in self._entries:
+                (start, end) = index.split(":")
+                self._entries[index] = EdmPredicate(start, end, self._sentence)
             if typename == "NAME":
-                if index not in self._entries:
-                    (start, end) = index.split(":")
-                    self._entries[index] = EdmPredicate(start, end, self._sentence)
                 self._entries[index].append(typevalue)
+            elif typename == "CARG":
+                self._entries[index].carg.append(typevalue)
+            else:
+                self._entries[index].arg(typename, typevalue)
+
 
     def align_with(self, other):
         """Using self as the model, make the other align with self"""
@@ -117,6 +113,13 @@ class EdmContainer(object):
                     other_predicate.end = self_predicate.end
                     other_predicate.span = self_predicate.span
                     other_predicate.len = self_predicate.len
+
+    def link_args(self):
+        for index, predicate in self._entries.iteritems():
+            for d in predicate.args:
+                assert d['index'] in self._entries
+                d['predicate'] = self._entries[d['index']]
+                del d['index']
 
 class Processor(object):
     def __init__(self, argparse_ns):
@@ -161,6 +164,14 @@ class Processor(object):
             i += 1
         return ret
 
+    def edm_post_process(self):
+        self.link_args()
+        self.align_edm()
+
+    def link_args(self):
+        for i in range(len(self._system_edm)):
+            self._system_edm[i].link_args()
+
     def align_edm(self):
         assert len(self._gold_edm) == len(self._system_edm), "same length"
         for i in range(len(self._gold_edm)):
@@ -171,7 +182,7 @@ class Processor(object):
             self.parse_mrs(self._files["ace"])
         self.parse_edm_gold(self._files["gold_edm"])
         self.parse_edm_system(self._files["system_edm"])
-        self.align_edm()
+        self.edm_post_process()
 
     def load_json(self):
         self.parse_mrs(self._files["ace"])

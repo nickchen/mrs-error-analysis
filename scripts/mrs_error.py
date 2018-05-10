@@ -13,39 +13,64 @@ from functools import partial
 from delphin.codecs import simplemrs
 from delphin.mrs import xmrs, eds, penman
 
-class ErgArg(object):
+class ErgPredicate(object):
+    class Arg(object):
+        def __init__(self, level, args):
+            self._args = {}
+            self._level = level
+            self._end = True
+            if len(args) > 0:
+                self._end = False
+                self.parse(args)
+
+        def parse(self, args):
+            if len(args) > 0:
+                arg = args[0]
+                arg_c = arg.split(" ")
+                assert len(arg_c) > 1, "more than one"
+                arg_level = int(arg_c[0])
+                arg_type = arg_c[1].strip(",")
+                if arg_type not in self._args:
+                    self._args[arg_type] = ErgPredicate.Arg(self._level + 1, args[1:])
+                else:
+                    self._args[arg_type].parse(args[1:])
+        def print_erg(self):
+            for key, erg in self._args.iteritems():
+                print "%s%s" % (self._level * " ", key)
+                erg.print_erg()
+
+
     def __init__(self):
         self._predicate = None
-        self._args = defaultdict(list)
+        self._level = 0
+        self._args = {}
 
     def parse_args(self, predicate, args):
-        args = [arg.strip() for arg in args.split("ARG")]
-        assert args[0] == "", "first arg empty"
-        arg = ErgArg.construct(args[1:])
         self._predicate = predicate
-        self._args[arg.arg_index].append(arg)
 
-    @staticmethod
-    def construct(arg_array):
-        if len(arg_array) == 0:
-            return None
-        first = arg_array[0]
-        # print first, arg_array
-        id = first.index(" ")
-        arg = ErgArg()
-        arg.arg_index = first[0:id]
-        arg.arg_attribute = first[id:]
-        child = ErgArg.construct(arg_array[1:])
-        if child is not None:
-            arg._args[child.arg_index].append(child)
-        return arg
+        args = [arg.strip(" ,.") for arg in args.split("ARG")]
+        assert args[0] == "", "first arg empty"
+        args = args[1:]
 
-
+        arg = args[0]
+        arg_c = arg.split(" ")
+        assert len(arg_c) > 1, "more than one"
+        arg_level = int(arg_c[0])
+        arg_type = arg_c[1]
+        if arg_type not in self._args:
+            self._args[arg_type] = ErgPredicate.Arg(1, args[1:])
+        else:
+            self._args[arg_type].parse(args[1:])
+    def print_erg(self):
+        for key, erg in self._args.iteritems():
+            print "%s%s" % (self._level * " ", key)
+            erg.print_erg()
 
 class Erg(object):
     def __init__(self, input):
-        self._tree = defaultdict(ErgArg)
+        self._ergs = defaultdict(ErgPredicate)
         self.parse(input)
+
     def parse(self, input):
         head = input.next()
         input.next()
@@ -54,8 +79,13 @@ class Erg(object):
             (predicate, args) = line.strip().split(":")
             predicate = predicate.strip()
             args = args.strip()
-            self._tree[predicate].parse_args(predicate, args)
+            self._ergs[predicate].parse_args(predicate, args)
             self._counts[predicate] += 1
+
+    def print_erg(self):
+        for pred, erg in self._ergs.iteritems():
+            print pred
+            erg.print_erg()
 
 class EdmPredicate(object):
     def __init__(self, start, end, sentence):
@@ -77,6 +107,7 @@ class EdmPredicate(object):
 
     def arg(self, name, value):
         self.args.append({'name':name, 'index':value})
+
 
 class EdmContainer(object):
     def __init__(self, sentence):
@@ -180,6 +211,7 @@ class Processor(object):
     def load_edm(self):
         if len(self.mrs) == 0:
             self.parse_mrs(self._files["ace"])
+        self.load_erg(self._files["erg"])
         self.parse_edm_gold(self._files["gold_edm"])
         self.parse_edm_system(self._files["system_edm"])
         self.edm_post_process()
@@ -190,11 +222,9 @@ class Processor(object):
         self.parse_amr_system(self._files["system"])
         self.parse_amr_gold(self._files["gold"])
 
-    def parse_erg(self, input):
-        self.erg = Erg(input)
-
-    def analyze(self):
-        self.parse_erg(self._files["erg"])
+    def load_erg(self):
+        self.erg = Erg(self._files["erg"])
+        self.erg.print_erg()
 
     def _edm_dict(self, gold, system):
         gold_set = set([i for i in gold._entries.iterkeys()])
@@ -339,6 +369,10 @@ def process_main_edm(ns):
     p = Processor(ns)
     p.load_edm()
 
+def process_main_erg(ns):
+    p = Processor(ns)
+    p.load_erg()
+
 def process_main_json(ns):
     p = Processor(ns)
     p.to_json()
@@ -363,6 +397,8 @@ def main(args=sys.argv[1:]):
     parser_json.add_argument('--system_edm', type=argparse.FileType('r'),
             default="../../error-analysis-data/dev.system.dmrs.edm")
     parser_json.add_argument('--out_dir', type=str, default="../webpage/data/")
+    parser_json.add_argument('--erg', type=argparse.FileType('r'),
+            default="../../erg1214/etc/surface.smi")
     parser_json.set_defaults(func=process_main_json)
 
     parser_error = subparsers.add_parser("error")
@@ -375,7 +411,15 @@ def main(args=sys.argv[1:]):
             default="../../error-analysis-data/dev.gold.edm")
     parser_edm.add_argument('--system_edm', type=argparse.FileType('r'),
             default="../../error-analysis-data/dev.system.dmrs.edm")
+    parser_edm.add_argument('--erg', type=argparse.FileType('r'),
+            default="../../erg1214/etc/surface.smi")
     parser_edm.set_defaults(func=process_main_edm)
+
+    parser_erg = subparsers.add_parser("erg")
+    parser_erg.add_argument('--erg', type=argparse.FileType('r'),
+            default="../../erg1214/etc/surface.smi")
+    parser_erg.set_defaults(func=process_main_erg)
+
 
     parser.set_defaults(func=process_main)
     ns = parser.parse_args(args)

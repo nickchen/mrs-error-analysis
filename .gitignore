@@ -5,3 +5,4 @@ webpage/.DS_Store
 .DS_Store
 webpage/edm.html
 sync.sh
+*.json

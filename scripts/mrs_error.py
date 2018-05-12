@@ -13,37 +13,34 @@ from functools import partial
 from delphin.codecs import simplemrs
 from delphin.mrs import xmrs, eds, penman
 
-class ErgPredicate(object):
-    class Arg(object):
-        def __init__(self, level, args):
-            self._args = {}
-            self._level = level
-            self._end = True
-            if len(args) > 0:
-                self._end = False
-                self.parse(args)
-
-        def parse(self, args):
-            if len(args) > 0:
-                arg = args[0]
-                arg_c = arg.split(" ")
-                assert len(arg_c) > 1, "more than one"
-                arg_level = int(arg_c[0])
-                arg_type = arg_c[1].strip(",")
-                if arg_type not in self._args:
-                    self._args[arg_type] = ErgPredicate.Arg(self._level + 1, args[1:])
-                else:
-                    self._args[arg_type].parse(args[1:])
-        def print_erg(self):
-            for key, erg in self._args.iteritems():
-                print "%s%s" % (self._level * " ", key)
-                erg.print_erg()
-
-
-    def __init__(self):
-        self._predicate = None
-        self._level = 0
+class Arg(object):
+    def __init__(self, level, args):
         self._args = {}
+        self._level = level
+        self._end = True
+        if len(args) > 0:
+            self._end = False
+            self.parse(args)
+
+    def parse(self, args):
+        if len(args) > 0:
+            arg = args[0]
+            arg_c = arg.split(" ")
+            assert len(arg_c) > 1, "more than one"
+            arg_level = int(arg_c[0])
+            arg_type = arg_c[1].strip(",")
+            if arg_type not in self._args:
+                self._args[arg_type] = Arg(self._level + 1, args[1:])
+            else:
+                self._args[arg_type].parse(args[1:])
+    def print_erg(self):
+        for key, erg in self._args.iteritems():
+            print "%s%s" % (self._level * " ", key)
+            erg.print_erg()
+
+class ErgPredicate(Arg):
+    def __init__(self):
+        super(ErgPredicate, self).__init__(0, [])
 
     def parse_args(self, predicate, args):
         self._predicate = predicate
@@ -58,7 +55,7 @@ class ErgPredicate(object):
         arg_level = int(arg_c[0])
         arg_type = arg_c[1]
         if arg_type not in self._args:
-            self._args[arg_type] = ErgPredicate.Arg(1, args[1:])
+            self._args[arg_type] = Arg(1, args[1:])
         else:
             self._args[arg_type].parse(args[1:])
     def print_erg(self):
@@ -108,6 +105,9 @@ class EdmPredicate(object):
     def arg(self, name, value):
         self.args.append({'name':name, 'index':value})
 
+    def match_args(self, erg):
+        for arg in self.args:
+            print arg
 
 class EdmContainer(object):
     def __init__(self, sentence):
@@ -121,6 +121,7 @@ class EdmContainer(object):
             (index, typename, typevalue) = item.strip().split(" ")
             if index not in self._entries:
                 (start, end) = index.split(":")
+                print index
                 self._entries[index] = EdmPredicate(start, end, self._sentence)
             if typename == "NAME":
                 self._entries[index].append(typevalue)
@@ -162,6 +163,7 @@ class Processor(object):
         self._system_edm = []
         self.out_dir = None
         self._files = {}
+        self._limit = argparse_ns.limit
         self.erg = None
         self.amr_loads = self._local_amr_loads
         if hasattr(argparse_ns, "out_dir"):
@@ -193,6 +195,8 @@ class Processor(object):
             e.parse(line)
             ret.append(e)
             i += 1
+            if self._limit > 0 and len(ret) >= self._limit:
+                break
         return ret
 
     def edm_post_process(self):
@@ -211,7 +215,7 @@ class Processor(object):
     def load_edm(self):
         if len(self.mrs) == 0:
             self.parse_mrs(self._files["ace"])
-        self.load_erg(self._files["erg"])
+        # self.load_erg()
         self.parse_edm_gold(self._files["gold_edm"])
         self.parse_edm_system(self._files["system_edm"])
         self.edm_post_process()
@@ -289,7 +293,7 @@ class Processor(object):
 
     def convert_mrs(self, mrs, properties=True, indent=None):
         if len(mrs) == 1:
-            self.mrs.append({'sentence': mrs[0][len("SKIP: "):]})
+            return {'sentence': mrs[0][len("SKIP: "):]}
         else:
             # CLS = partial(penman.dumps, model=xmrs.Dmrs)
             sent = mrs[0]
@@ -298,19 +302,27 @@ class Processor(object):
                 x = xs
             else:
                 x = xmrs.Mrs.from_xmrs(xs)
-            self.mrs.append({'sentence': sent[len("SENT: "):], 'mrs': x})
+            return {'sentence': sent[len("SENT: "):], 'mrs': x}
 
-    def parse_mrs(self, input):
+    def _mrs_file_to_lines(self, input):
         mrs = []
         for line in input:
             line = line.strip()
             if len(line) == 0:
                 if len(mrs) == 0: continue
-                self.convert_mrs(mrs)
+                yield mrs
                 mrs = []
                 continue
             mrs.append(line)
+        if len(mrs) > 0:
+            yield mrs
 
+
+    def parse_mrs(self, input):
+        for mrs in self._mrs_file_to_lines(input):
+            self.mrs.append(self.convert_mrs(mrs))
+            if self._limit > 0 and len(self.mrs) > self._limit:
+                break
 
     def convert_amr(self, lines):
         amr_string = "\n".join(lines)
@@ -324,23 +336,27 @@ class Processor(object):
 
         return {'amr': amr_string}
 
-    def parse_amr_file(self, input):
-        out_list = []
+    def _parse_amr_file_to_lines(self, input):
         lines = []
         for line in input:
             line = line.rstrip()
             if len(line) == 0:
                 if len(lines) > 0:
-                    amr = self.convert_amr(lines)
-                    if amr is not None:
-                        out_list.append(amr)
+                    yield lines
                 lines = []
                 continue
             lines.append(line)
         if len(lines) > 0:
+            yield lines
+
+    def parse_amr_file(self, input):
+        out_list = []
+        for lines in self._parse_amr_file_to_lines(input):
             amr = self.convert_amr(lines)
             if amr is not None:
                 out_list.append(amr)
+            if self._limit > 0 and len(ret) >= self._limit:
+                break
         return out_list
 
     def parse_edm_gold(self, input):
@@ -383,6 +399,7 @@ def process_main_json(ns):
 
 def main(args=sys.argv[1:]):
     parser = argparse.ArgumentParser(prog=sys.argv[0])
+    parser.add_argument('--limit', type=int, default=0)
     parser.add_argument('--ace', type=argparse.FileType('r'),
             default="../../error-analysis-data/dev.erg.mrs")
     subparsers = parser.add_subparsers()

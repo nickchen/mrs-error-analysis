@@ -213,9 +213,9 @@ class Processor(object):
             self._gold_edm[i].align_with(self._system_edm[i])
 
     def load_edm(self):
+        self.load_erg()
         if len(self.mrs) == 0:
             self.parse_mrs(self._files["ace"])
-        # self.load_erg()
         self.parse_edm_gold(self._files["gold_edm"])
         self.parse_edm_system(self._files["system_edm"])
         self.edm_post_process()
@@ -227,8 +227,9 @@ class Processor(object):
         self.parse_amr_gold(self._files["gold"])
 
     def load_erg(self):
-        self.erg = Erg(self._files["erg"])
-        self.erg.print_erg()
+        if self.erg is None:
+            self.erg = Erg(self._files["erg"])
+            self.erg.print_erg()
 
     def _edm_dict(self, gold, system):
         gold_set = set([i for i in gold._entries.iterkeys()])
@@ -321,7 +322,7 @@ class Processor(object):
     def parse_mrs(self, input):
         for mrs in self._mrs_file_to_lines(input):
             self.mrs.append(self.convert_mrs(mrs))
-            if self._limit > 0 and len(self.mrs) > self._limit:
+            if self._limit > 0 and len(self.mrs) >= self._limit:
                 break
 
     def convert_amr(self, lines):
@@ -355,7 +356,7 @@ class Processor(object):
             amr = self.convert_amr(lines)
             if amr is not None:
                 out_list.append(amr)
-            if self._limit > 0 and len(ret) >= self._limit:
+            if self._limit > 0 and len(out_list) >= self._limit:
                 break
         return out_list
 
@@ -399,7 +400,7 @@ def process_main_json(ns):
 
 def main(args=sys.argv[1:]):
     parser = argparse.ArgumentParser(prog=sys.argv[0])
-    parser.add_argument('--limit', type=int, default=0)
+    parser.add_argument('--limit', type=int, default=1)
     parser.add_argument('--ace', type=argparse.FileType('r'),
             default="../../error-analysis-data/dev.erg.mrs")
     subparsers = parser.add_subparsers()

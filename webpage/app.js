@@ -37,7 +37,7 @@ Templates.edm = [
           '<tr><th>Common </th><td class="stats_value"><%= common %></td></tr>',
           '<tr><th>Gold Unique</th><td class="stats_value"><%= gold %></td></tr>',
           '<tr><th>System Unique</th><td class="stats_value"><%= system %></td></tr>',
-          '<tr><th>&nbsp;&nbsp;name</th><td class="stats_value"><%= name %></td></tr>',
+          '<tr><th>&nbsp;&nbsp;named</th><td class="stats_value"><%= named %></td></tr>',
           '<tr><th>&nbsp;&nbsp;unknown</th><td class="stats_value"><%= unknown %></td></tr>',
           '<tr><th>&nbsp;&nbsp;compound</th><td class="stats_value"><%= compound %></td></tr>',
           '<tr><th>&nbsp;&nbsp;udef_q</th><td class="stats_value"><%= udef_q %></td></tr>',

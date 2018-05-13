@@ -294,7 +294,7 @@ function Result(result, parent) {
                                     predicate_arg: $stat.predicate_arg})).appendTo($inner);
         self.edm = EDM($edm, self.data.edm);
         $.each($stat, function(name, value) {
-          var system_stats = ["named", "unknonw", "compound", "udef_q", "proper_q", "subord", "card", "yofc"];
+          var system_stats = ["named", "unknown", "compound", "udef_q", "proper_q", "subord", "card", "yofc"];
           var type_array = ["system", "gold"];
           for (var i = 0; i < type_array.length; i++) {
             var type_str = type_array[i];

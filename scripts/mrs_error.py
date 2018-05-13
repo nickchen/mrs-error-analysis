@@ -392,7 +392,7 @@ class Processor(object):
             for predicate in (system_index_predicates - gold_index_predicates):
                 if predicate.endswith("unknown"):
                     stats['unknown'] += 1
-                elif predicate in ['compound', 'udef_q', 'proper_q', 'yofc', 'named']:
+                elif predicate in ['compound', 'udef_q', 'proper_q', 'yofc', 'named', 'subord', 'card']:
                     stats[predicate] += 1
                 elif predicate not in self.erg:
                     stats['predicate'] += 1

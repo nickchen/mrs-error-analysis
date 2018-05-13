@@ -42,6 +42,8 @@ Templates.edm = [
           '<tr><th>&nbsp;&nbsp;compound</th><td class="stats_value"><%= compound %></td></tr>',
           '<tr><th>&nbsp;&nbsp;udef_q</th><td class="stats_value"><%= udef_q %></td></tr>',
           '<tr><th>&nbsp;&nbsp;proper_q</th><td class="stats_value"><%= proper_q %></td></tr>',
+          '<tr><th>&nbsp;&nbsp;subord</th><td class="stats_value"><%= subord %></td></tr>',
+          '<tr><th>&nbsp;&nbsp;card</th><td class="stats_value"><%= card %></td></tr>',
           '<tr><th>&nbsp;&nbsp;yofc</th><td class="stats_value"><%= yofc %></td></tr>',
           '<tr><th>Predicate not in Surface</th><td class="stats_value"><%= predicate %></td></tr>',
           '<tr><th>Predicate Arg Mismatch</th><td class="stats_value"><%= predicate_arg %></td></tr>',
@@ -297,6 +299,8 @@ function Result(result, parent) {
                                     udef_q: $stat.udef_q,
                                     proper_q: $stat.proper_q,
                                     yofc: $stat.yofc,
+                                    subord: $stat.subord,
+                                    card: $stat.card,
                                     predicate: $stat.predicate,
                                     predicate_arg: $stat.predicate_arg})).appendTo($inner);
         self.edm = EDM($edm, self.data.edm);

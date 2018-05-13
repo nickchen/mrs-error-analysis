@@ -79,9 +79,11 @@ class Erg(object):
             self._ergs[predicate].parse_args(predicate, args)
             self._counts[predicate] += 1
 
+    def __contains__(self, predicate):
+        return predicate in self._ergs
+
     def print_erg(self):
         for pred, erg in self._ergs.iteritems():
-            print pred
             erg.print_erg()
 
 class EdmPredicate(object):
@@ -96,7 +98,7 @@ class EdmPredicate(object):
         self.args = []
 
     def append(self, predicate):
-        self.predicates.append(predicate)
+        self.predicates.append(predicate.rstrip("_rel"))
         self.predicates = sorted(self.predicates)
 
     def carg(self, value):
@@ -105,9 +107,8 @@ class EdmPredicate(object):
     def arg(self, name, value):
         self.args.append({'name':name, 'index':value})
 
-    def match_args(self, erg):
-        for arg in self.args:
-            print arg
+    def __str__(self):
+        return "<%s>:<%s>" % (self.predicates, self.args)
 
 class EdmContainer(object):
     def __init__(self, sentence):
@@ -121,7 +122,6 @@ class EdmContainer(object):
             (index, typename, typevalue) = item.strip().split(" ")
             if index not in self._entries:
                 (start, end) = index.split(":")
-                print index
                 self._entries[index] = EdmPredicate(start, end, self._sentence)
             if typename == "NAME":
                 self._entries[index].append(typevalue)
@@ -153,6 +153,11 @@ class EdmContainer(object):
                 d['predicate'] = self._entries[d['index']]
                 del d['index']
 
+    def match_args(self, erg):
+        pass
+        # for pred in self._entries.itervalues():
+        #     print pred
+
 class Processor(object):
     def __init__(self, argparse_ns):
         self.__package_amr_loads = partial(penman.loads, model=xmrs.Dmrs)
@@ -161,6 +166,7 @@ class Processor(object):
         self._gold_edm = []
         self.system = []
         self._system_edm = []
+        self._edm_compare = []
         self.out_dir = None
         self._files = {}
         self._limit = argparse_ns.limit
@@ -229,37 +235,8 @@ class Processor(object):
     def load_erg(self):
         if self.erg is None:
             self.erg = Erg(self._files["erg"])
-            self.erg.print_erg()
-
-    def _edm_dict(self, gold, system):
-        gold_set = set([i for i in gold._entries.iterkeys()])
-        system_set = set([i for i in system._entries.iterkeys()])
-        predicates = {}
-        stats = defaultdict(int)
-        for index in list(gold_set | system_set):
-            pred = gold._entries[index] if index in gold._entries else system._entries[index]
-            predicates[index] = {
-                "start": pred.start,
-                "end": pred.end,
-                "len": (pred.end - pred.start),
-                "span": pred.span,
-                "predicate" : {}
-            }
-            gold_index_predicates = set(gold._entries[index].predicates) if index in gold_set else set()
-            system_index_predicates = set(system._entries[index].predicates) if index in system_set else set()
-            stats['total'] += len(system_index_predicates | gold_index_predicates)
-            stats['gold'] += len(gold_index_predicates - system_index_predicates)
-            stats['system'] += len(system_index_predicates - gold_index_predicates)
-            stats['common'] += len(system_index_predicates & gold_index_predicates)
-            if len(gold_index_predicates) > 0:
-                predicates[index]["predicate"]["gold"] = list(gold_index_predicates)
-            if len(system_index_predicates) > 0:
-                predicates[index]["predicate"]["system"] = list(system_index_predicates)
-        return {'predicates': predicates, 'stats': stats}
-
 
     def to_json(self, indent=2):
-        self.load_json()
         assert(len(self.mrs) == len(self.system))
         assert(len(self.mrs) == len(self.gold))
         for i in range(len(self.mrs)):
@@ -284,13 +261,12 @@ class Processor(object):
                      "dmrs": xmrs.Dmrs.to_dict(self.system[i]['dmrs'], properties=True)})
                 readings += 1
             if len(self._gold_edm) != 0 and len(self._gold_edm) == len(self._system_edm):
-                result["results"].append({"result-id": "EDM", "edm": self._edm_dict(self._gold_edm[i], self._system_edm[i])})
+                result["results"].append({"result-id": "EDM", "edm": self._edm_compare[i]})
                 readings += 1
             result["readings"] = readings
             file_outpath = os.path.join(self.out_dir, "n%s.json" % i)
             with open(file_outpath, "w") as f:
                 f.write(json.dumps(result, indent=indent))
-
 
     def convert_mrs(self, mrs, properties=True, indent=None):
         if len(mrs) == 1:
@@ -374,6 +350,55 @@ class Processor(object):
         self.system = self.parse_amr_file(input)
         self.system_error = len([s for s in self.system if s.get('dmrs') is None])
 
+    def analyze(self):
+        self.system_gold_compare()
+
+    def validate_args(self, system, index, predicate):
+        # print predicate
+        assert self.erg is not None, "erg defined"
+        assert predicate in self.erg, "predicate in erg"
+        return 0
+
+    def system_gold_compare(self):
+        assert len(self._gold_edm) == len(self._system_edm), "same length"
+        for i in range(len(self._gold_edm)):
+            d = self._edm_dict(i, self._gold_edm[i], self._system_edm[i])
+            self._edm_compare.append(d)
+
+    def _edm_dict(self, i, gold, system):
+        gold_set = set([k for k in gold._entries.iterkeys()])
+        system_set = set([k for k in system._entries.iterkeys()])
+        predicates = {}
+        stats = defaultdict(int)
+        for index in list(gold_set | system_set):
+            pred = gold._entries[index] if index in gold._entries else system._entries[index]
+            predicates[index] = {
+                "start": pred.start,
+                "end": pred.end,
+                "len": (pred.end - pred.start),
+                "span": pred.span,
+                "predicate" : {}
+            }
+            gold_index_predicates = set(gold._entries[index].predicates) if index in gold_set else set()
+            system_index_predicates = set(system._entries[index].predicates) if index in system_set else set()
+            stats['total'] += len(system_index_predicates | gold_index_predicates)
+            stats['gold'] += len(gold_index_predicates - system_index_predicates)
+            stats['system'] += len(system_index_predicates - gold_index_predicates)
+            stats['common'] += len(system_index_predicates & gold_index_predicates)
+            if len(gold_index_predicates) > 0:
+                predicates[index]["predicate"]["gold"] = list(gold_index_predicates)
+            if len(system_index_predicates) > 0:
+                predicates[index]["predicate"]["system"] = list(system_index_predicates)
+            for predicate in (system_index_predicates - gold_index_predicates):
+                if predicate.endswith("unknown"):
+                    stats['unknown'] += 1
+                elif predicate in ['compound', 'udef_q', 'proper_q', 'yofc', 'named']:
+                    stats[predicate] += 1
+                elif predicate not in self.erg:
+                    stats['predicate'] += 1
+                elif not self.validate_args(system, index, predicate):
+                    stats['predicate_arg'] += 1
+        return {'predicates': predicates, 'stats': stats}
 
 def process_main(ns):
     p = Processor(ns)
@@ -392,6 +417,8 @@ def process_main_erg(ns):
 
 def process_main_json(ns):
     p = Processor(ns)
+    p.load_json()
+    p.analyze()
     p.to_json()
     print "total: %d gold: {%d/%d} system: {%d/%d}" % (
         len(p.mrs),
@@ -400,7 +427,7 @@ def process_main_json(ns):
 
 def main(args=sys.argv[1:]):
     parser = argparse.ArgumentParser(prog=sys.argv[0])
-    parser.add_argument('--limit', type=int, default=1)
+    parser.add_argument('--limit', type=int, default=0)
     parser.add_argument('--ace', type=argparse.FileType('r'),
             default="../../error-analysis-data/dev.erg.mrs")
     subparsers = parser.add_subparsers()

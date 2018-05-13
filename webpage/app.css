@@ -14,8 +14,22 @@
   padding-right: 1px;
 }
 
-.edm_stats td {
+.edm_stats ul {
+    list-style-type: none;
+}
+
+.edm_stats th {
   text-align: left;
   font-family: sans-serif;
   font-size: 10px;
+}
+
+.edm_stats td {
+  text-align: right;
+  font-family: sans-serif;
+  font-size: 10px;
+}
+
+.stats_value {
+  text-align: right;
 }

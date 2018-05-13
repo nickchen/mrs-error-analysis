@@ -33,10 +33,18 @@ Templates.edm = [
       '<div><a href="#" id="edm_option" class="btn btn-primary btn-sm" role="button" aria-pressed="true"></a></div>',
         '<div><span class="common">Common</span>/<span class="gold">Gold Only</span>/<span class="system">System Only</span></div>',
         '<div><table class="edm edm_table edm_stats">',
-          '<tr><td>Total</td><td><%= total %></td></tr>',
-          '<tr><td>Common </td><td><%= common %></td></tr>',
-          '<tr><td>Gold Unique</td><td><%= gold %></td></tr>',
-          '<tr><td>System Unique</td><td><%= system %></td></tr>',
+          '<tr><th>Total</th><td class="stats_value"><%= total %></td></tr>',
+          '<tr><th>Common </th><td class="stats_value"><%= common %></td></tr>',
+          '<tr><th>Gold Unique</th><td class="stats_value"><%= gold %></td></tr>',
+          '<tr><th>System Unique</th><td class="stats_value"><%= system %></td></tr>',
+          '<tr><th>&nbsp;&nbsp;name</th><td class="stats_value"><%= name %></td></tr>',
+          '<tr><th>&nbsp;&nbsp;unknown</th><td class="stats_value"><%= unknown %></td></tr>',
+          '<tr><th>&nbsp;&nbsp;compound</th><td class="stats_value"><%= compound %></td></tr>',
+          '<tr><th>&nbsp;&nbsp;udef_q</th><td class="stats_value"><%= udef_q %></td></tr>',
+          '<tr><th>&nbsp;&nbsp;proper_q</th><td class="stats_value"><%= proper_q %></td></tr>',
+          '<tr><th>&nbsp;&nbsp;yofc</th><td class="stats_value"><%= yofc %></td></tr>',
+          '<tr><th>Predicate not in Surface</th><td class="stats_value"><%= predicate %></td></tr>',
+          '<tr><th>Predicate Arg Mismatch</th><td class="stats_value"><%= predicate_arg %></td></tr>',
           '</table></div>',
         '<table class="edm edm_table">',
           '<tr>',
@@ -282,7 +290,15 @@ function Result(result, parent) {
         var $edm = $(Templates.edm({total: $stat.total,
                                     gold: $stat.gold,
                                     system: $stat.system,
-                                    common: $stat.common})).appendTo($inner);
+                                    common: $stat.common,
+                                    named: $stat.named,
+                                    compound: $stat.compound,
+                                    unknown: $stat.unknown,
+                                    udef_q: $stat.udef_q,
+                                    proper_q: $stat.proper_q,
+                                    yofc: $stat.yofc,
+                                    predicate: $stat.predicate,
+                                    predicate_arg: $stat.predicate_arg})).appendTo($inner);
         self.edm = EDM($edm, self.data.edm);
     }
 
@@ -370,7 +386,7 @@ function updateLinks(index, edm_diff_only) {
   if (previous === -1) {
       previous = MAX;
   }
-  if (next === (MAX + 1)) {
+  if (next >= MAX) {
       next = 0;
   }
   href_common = "?edm_diff_only=";

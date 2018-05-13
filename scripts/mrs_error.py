@@ -389,15 +389,20 @@ class Processor(object):
                 predicates[index]["predicate"]["gold"] = list(gold_index_predicates)
             if len(system_index_predicates) > 0:
                 predicates[index]["predicate"]["system"] = list(system_index_predicates)
-            for predicate in (system_index_predicates - gold_index_predicates):
-                if predicate.endswith("unknown"):
-                    stats['unknown'] += 1
-                elif predicate in ['compound', 'udef_q', 'proper_q', 'yofc', 'named', 'subord', 'card']:
-                    stats[predicate] += 1
-                elif predicate not in self.erg:
-                    stats['predicate'] += 1
-                elif not self.validate_args(system, index, predicate):
-                    stats['predicate_arg'] += 1
+            def stats_update(prefix, predicates):
+                for predicate in predicates:
+                    if predicate.endswith("unknown"):
+                        stats["%s_%s"% (prefix, 'unknown')] += 1
+                    elif predicate in ['compound', 'udef_q', 'proper_q', 'yofc', 'named', 'subord', 'card']:
+                        stats["%s_%s"% (prefix, predicate)] += 1
+                    elif prefix == "system":
+                        if predicate not in self.erg:
+                            stats['predicate'] += 1
+                        elif not self.validate_args(system, index, predicate):
+                            stats['predicate_arg'] += 1
+            stats_update("system", system_index_predicates - gold_index_predicates)
+            stats_update("gold", gold_index_predicates - system_index_predicates)
+
         return {'predicates': predicates, 'stats': stats}
 
 def process_main(ns):

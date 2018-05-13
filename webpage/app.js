@@ -35,16 +35,8 @@ Templates.edm = [
         '<div><table class="edm edm_table edm_stats">',
           '<tr><th>Total</th><td class="stats_value"><%= total %></td></tr>',
           '<tr><th>Common </th><td class="stats_value"><%= common %></td></tr>',
-          '<tr><th>Gold Unique</th><td class="stats_value"><%= gold %></td></tr>',
-          '<tr><th>System Unique</th><td class="stats_value"><%= system %></td></tr>',
-          '<tr><th>&nbsp;&nbsp;named</th><td class="stats_value"><%= named %></td></tr>',
-          '<tr><th>&nbsp;&nbsp;unknown</th><td class="stats_value"><%= unknown %></td></tr>',
-          '<tr><th>&nbsp;&nbsp;compound</th><td class="stats_value"><%= compound %></td></tr>',
-          '<tr><th>&nbsp;&nbsp;udef_q</th><td class="stats_value"><%= udef_q %></td></tr>',
-          '<tr><th>&nbsp;&nbsp;proper_q</th><td class="stats_value"><%= proper_q %></td></tr>',
-          '<tr><th>&nbsp;&nbsp;subord</th><td class="stats_value"><%= subord %></td></tr>',
-          '<tr><th>&nbsp;&nbsp;card</th><td class="stats_value"><%= card %></td></tr>',
-          '<tr><th>&nbsp;&nbsp;yofc</th><td class="stats_value"><%= yofc %></td></tr>',
+          '<tr id="gold_row"><th>Gold Unique</th><td class="stats_value"><%= gold %></td></tr>',
+          '<tr id="system_row"><th>System Unique</th><td class="stats_value"><%= system %></td></tr>',
           '<tr><th>Predicate not in Surface</th><td class="stats_value"><%= predicate %></td></tr>',
           '<tr><th>Predicate Arg Mismatch</th><td class="stats_value"><%= predicate_arg %></td></tr>',
           '</table></div>',
@@ -68,6 +60,9 @@ Templates.edm_entry = [
     '</tr>',
 ].join("\n");
 
+Templates.stat_entry = [
+    '<tr><th>&nbsp;&nbsp;<%= name %></th><td><%= value %></td></tr>'].join("\n");
+
 Templates.successStatus = [
     '<p id="parse-status">Showing <%= numResults %> of <%= readings %> analyses.</p>',
     '<div id="text-input"><%= input %></div>'
@@ -76,6 +71,7 @@ Templates.successStatus = [
 function EDM(parentElement, edm) {
   var self = { };
   var predicates = [];
+  var stats = edm.stats;
   $.each(edm.predicates, function(i, d) {
     predicates.push(d);
   });
@@ -93,6 +89,7 @@ function EDM(parentElement, edm) {
     if (typeof d.predicate.system !== 'undefined') {
       system_set = new Set(d.predicate.system);
     }
+
     var intersection = new Set([...gold_set].filter(x => system_set.has(x)));
     var gold_unique = new Set([...gold_set].filter(x => !system_set.has(x)));
     var system_unique = new Set([...system_set].filter(x => !gold_set.has(x)));
@@ -121,7 +118,7 @@ function EDM(parentElement, edm) {
         system: system,
         span_class: span_class,
       }))
-    );
+    ); // end parentElement
   });
   return self;
 }
@@ -293,17 +290,23 @@ function Result(result, parent) {
                                     gold: $stat.gold,
                                     system: $stat.system,
                                     common: $stat.common,
-                                    named: $stat.named,
-                                    compound: $stat.compound,
-                                    unknown: $stat.unknown,
-                                    udef_q: $stat.udef_q,
-                                    proper_q: $stat.proper_q,
-                                    yofc: $stat.yofc,
-                                    subord: $stat.subord,
-                                    card: $stat.card,
                                     predicate: $stat.predicate,
                                     predicate_arg: $stat.predicate_arg})).appendTo($inner);
         self.edm = EDM($edm, self.data.edm);
+        $.each($stat, function(name, value) {
+          var system_stats = ["named", "unknonw", "compound", "udef_q", "proper_q", "subord", "card", "yofc"];
+          var type_array = ["system", "gold"];
+          for (var i = 0; i < type_array.length; i++) {
+            var type_str = type_array[i];
+            if (name.indexOf(type_str) === 0) {
+              var vname = name.substring(type_str.length + 1);
+              if (system_stats.indexOf(vname) > -1) {
+                $($edm).find("#" + type_str + "_row").after(
+                  $(Templates.stat_entry({name: vname, value: value})));
+              }
+            }
+          }
+        });
     }
 
 

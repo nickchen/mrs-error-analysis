@@ -36,12 +36,17 @@ class Arg(object):
                         assert token == ("ARG%s" % (obj._level)), "first arg should be same level"
                     arg_type = arg_tokens.next()
                     if arg_type not in obj._args:
+                        obj._args[arg_type] = Arg(obj._level + 1, arg_tokens)
                         has_more_args = not obj._args[arg_type]._end
+                    else:
                         has_more_args = Arg.parse(obj._args[arg_type], arg_tokens)
                 token = next(arg_tokens)
         except StopIteration:
+            pass
+        return has_more_args
 
     def print_erg(self):
+        # print "HERE", self._level, self._end, self._args
         for key, erg in self._args.iteritems():
             print "%s%s" % (self._level * " ", key)
             erg.print_erg()
@@ -60,7 +65,6 @@ class ErgPredicate(Arg):
 
     def parse_args(self, predicate, args):
         self._predicate = predicate
-
         arg_tokens = iter(re.split("\s|\,|\.", args))
         Arg.parse(self, arg_tokens)
 
@@ -183,7 +187,7 @@ class EdmContainer(object):
     def align_with(self, other):
         """Using self as the model, make the other align with self"""
         for index, self_predicate in self._entries.iteritems():
-            if index not in other._entries and self_predicate.span.endswith(("%")):
+            if index not in other._entries and self_predicate.span.endswith((".")):
                 # candidate for alignment fix
                 other_key = "%d:%d" % (self_predicate.start, self_predicate.end - 1)
                 if other_key in other._entries:

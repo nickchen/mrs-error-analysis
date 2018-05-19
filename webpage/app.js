@@ -38,7 +38,7 @@ Templates.edm = [
           '<tr id="gold_row"><th>Gold Unique</th><td class="stats_value"><%= gold %></td></tr>',
           '<tr id="system_row"><th>System Unique</th><td class="stats_value"><%= system %></td></tr>',
           '<tr><th>Predicate not in Surface</th><td class="stats_value"><%= predicate %></td></tr>',
-          '<tr><th>Predicate Arg Mismatch</th><td class="stats_value"><%= predicate_arg %></td></tr>',
+          '<tr id="mismatch_row"><th>Predicate Arg Mismatch</th><td class="stats_value"><%= predicate_arg %></td></tr>',
           '</table></div>',
         '<table class="edm edm_table">',
           '<tr>',
@@ -296,13 +296,20 @@ function Result(result, parent) {
         $.each($stat, function(name, value) {
           var system_stats = ["named", "unknown", "compound", "udef_q", "proper_q", "subord", "card", "yofc"];
           var type_array = ["system", "gold"];
-          for (var i = 0; i < type_array.length; i++) {
-            var type_str = type_array[i];
-            if (name.indexOf(type_str) === 0) {
-              var vname = name.substring(type_str.length + 1);
-              if (system_stats.indexOf(vname) > -1) {
-                $($edm).find("#" + type_str + "_row").after(
-                  $(Templates.stat_entry({name: vname, value: value})));
+          if (name === "predicate_errors") {
+            $.each(value, function(sname, svalue) {
+              $($edm).find("#mismatch_row").after(
+                $(Templates.stat_entry({name: sname, value: svalue})));
+            });
+          } else {
+            for (var i = 0; i < type_array.length; i++) {
+              var type_str = type_array[i];
+              if (name.indexOf(type_str) === 0) {
+                var vname = name.substring(type_str.length + 1);
+                if (system_stats.indexOf(vname) > -1) {
+                  $($edm).find("#" + type_str + "_row").after(
+                    $(Templates.stat_entry({name: vname, value: value})));
+                }
               }
             }
           }

@@ -6,6 +6,8 @@ import json
 import argparse
 import penman as PM
 import traceback
+import shlex
+import re
 
 from collections import defaultdict
 from functools import partial
@@ -14,29 +16,43 @@ from delphin.codecs import simplemrs
 from delphin.mrs import xmrs, eds, penman
 
 class Arg(object):
-    def __init__(self, level, args):
+    def __init__(self, level, arg_tokens):
         self._args = {}
         self._level = level
         self._end = True
-        if len(args) > 0:
+        if isinstance(arg_tokens, list):
+            arg_tokens = iter(arg_tokens)
+        if Arg.parse(self, arg_tokens):
             self._end = False
-            self.parse(args)
 
-    def parse(self, args):
-        if len(args) > 0:
-            arg = args[0]
-            arg_c = arg.split(" ")
-            assert len(arg_c) > 1, "more than one"
-            arg_level = int(arg_c[0])
-            arg_type = arg_c[1].strip(",")
-            if arg_type not in self._args:
-                self._args[arg_type] = Arg(self._level + 1, args[1:])
-            else:
-                self._args[arg_type].parse(args[1:])
+    @staticmethod
+    def parse(obj, arg_tokens):
+        has_more_args = False
+        try:
+            token = next(arg_tokens)
+            while True:
+                if token.startswith("ARG"):
+                    if token != "ARG":
+                        assert token == ("ARG%s" % (obj._level)), "first arg should be same level"
+                    arg_type = arg_tokens.next()
+                    if arg_type not in obj._args:
+                        has_more_args = not obj._args[arg_type]._end
+                        has_more_args = Arg.parse(obj._args[arg_type], arg_tokens)
+                token = next(arg_tokens)
+        except StopIteration:
+
     def print_erg(self):
         for key, erg in self._args.iteritems():
             print "%s%s" % (self._level * " ", key)
             erg.print_erg()
+
+    def level_args(self, level):
+        args = []
+        for arg, value  in self._args.iteritems():
+            if self._level == level:
+                args.append(arg)
+            args += value.level_args(level)
+        return args
 
 class ErgPredicate(Arg):
     def __init__(self):
@@ -45,23 +61,8 @@ class ErgPredicate(Arg):
     def parse_args(self, predicate, args):
         self._predicate = predicate
 
-        args = [arg.strip(" ,.") for arg in args.split("ARG")]
-        assert args[0] == "", "first arg empty"
-        args = args[1:]
-
-        arg = args[0]
-        arg_c = arg.split(" ")
-        assert len(arg_c) > 1, "more than one"
-        arg_level = int(arg_c[0])
-        arg_type = arg_c[1]
-        if arg_type not in self._args:
-            self._args[arg_type] = Arg(1, args[1:])
-        else:
-            self._args[arg_type].parse(args[1:])
-    def print_erg(self):
-        for key, erg in self._args.iteritems():
-            print "%s%s" % (self._level * " ", key)
-            erg.print_erg()
+        arg_tokens = iter(re.split("\s|\,|\.", args))
+        Arg.parse(self, arg_tokens)
 
 class Erg(object):
     def __init__(self, input):
@@ -82,9 +83,8 @@ class Erg(object):
     def __contains__(self, predicate):
         return predicate in self._ergs
 
-    def print_erg(self):
-        for pred, erg in self._ergs.iteritems():
-            erg.print_erg()
+    def __getitem__(self, predicate):
+        return self._ergs[predicate]
 
 class EdmPredicate(object):
     def __init__(self, start, end, sentence):
@@ -110,6 +110,56 @@ class EdmPredicate(object):
     def __str__(self):
         return "<%s>:<%s>" % (self.predicates, self.args)
 
+    def parse_arg_level(self, arg_name):
+        arg_names = arg_name.split("/")
+        if arg_names[0] == "ARG":
+            return arg_names[0], 0
+        return arg_names[0], int(arg_names[0][3:])
+
+    def is_same_span(self, other):
+        return self.start == other.start and self.end == other.end
+
+    def get_types(self, erg_dict):
+        ts = []
+        for p in self.predicates:
+            if "_u_" in p:
+                ts.append("u")
+            else:
+                if p in erg_dict:
+                    erg_pred = erg_dict[p]
+                    ts += erg_pred.level_args(0)
+        return ts
+
+    def external_args(self):
+        """find all the outgoing args, where the arg_predicate span is not self"""
+        already_yield = []
+        for arg in self.args:
+            if arg['name'].startswith("ARG"):
+                arg_predicate = arg['predicate']
+                if not arg_predicate.is_same_span(self):
+                    arg_name, arg_level = self.parse_arg_level(arg['name'])
+                    if arg_name not in already_yield:
+                        yield arg_name, arg_level, arg_predicate
+                        already_yield.append(arg_name)
+
+    def match_args(self, predicate_str, erg_dict):
+        errors = defaultdict(int)
+        erg_pred = erg_dict[predicate_str]
+        for arg_name, arg_level, arg_predicate in self.external_args():
+            erg_level_types = erg_pred.level_args(arg_level)
+            if len(erg_level_types) > 0:
+                # only do arg comparsion if erg have args
+                # otherwise it's extra arg
+                arg_predicate_types = arg_predicate.get_types(erg_dict)
+                # XXX assume "x" is wildcard
+                if len(set(erg_level_types) & set(arg_predicate_types)) == 0 and not "x" in arg_predicate_types:
+                    errors["%s incorrect - %s" % (arg_name, predicate_str)] += 1
+                    # print arg_name, arg_level, arg_predicate
+            else:
+                errors["%s extra - %s" % (arg_name, predicate_str)] += 1
+        # print errors
+        return errors
+
 class EdmContainer(object):
     def __init__(self, sentence):
         self._sentence = sentence
@@ -130,33 +180,34 @@ class EdmContainer(object):
             else:
                 self._entries[index].arg(typename, typevalue)
 
-
     def align_with(self, other):
         """Using self as the model, make the other align with self"""
         for index, self_predicate in self._entries.iteritems():
-            if index not in other._entries and self_predicate.span.endswith("."):
+            if index not in other._entries and self_predicate.span.endswith(("%")):
                 # candidate for alignment fix
                 other_key = "%d:%d" % (self_predicate.start, self_predicate.end - 1)
                 if other_key in other._entries:
                     other_predicate = other._entries[other_key]
                     del other._entries[other_key]
-                    other._entries[index] = other_predicate
-                    other_predicate.start = self_predicate.start
-                    other_predicate.end = self_predicate.end
-                    other_predicate.span = self_predicate.span
-                    other_predicate.len = self_predicate.len
+                    if index not in other._entries:
+                        other._entries[index] = other_predicate
+                        other_predicate.start = self_predicate.start
+                        other_predicate.end = self_predicate.end
+                        other_predicate.span = self_predicate.span
+                        other_predicate.len = self_predicate.len
+                    else:
+                        other._entries[index].merge(other_predicate)
 
-    def link_args(self):
+    def edm_link_args(self):
         for index, predicate in self._entries.iteritems():
             for d in predicate.args:
                 assert d['index'] in self._entries
                 d['predicate'] = self._entries[d['index']]
                 del d['index']
 
-    def match_args(self, erg):
-        pass
-        # for pred in self._entries.itervalues():
-        #     print pred
+    def match_args(self, index, predicate_str, erg):
+        predicate = self._entries[index]
+        return predicate.match_args(predicate_str, erg)
 
 class Processor(object):
     def __init__(self, argparse_ns):
@@ -166,7 +217,7 @@ class Processor(object):
         self._gold_edm = []
         self.system = []
         self._system_edm = []
-        self._edm_compare = []
+        self._edm_compare_result = []
         self.out_dir = None
         self._files = {}
         self._limit = argparse_ns.limit
@@ -174,7 +225,7 @@ class Processor(object):
         self.amr_loads = self._local_amr_loads
         if hasattr(argparse_ns, "out_dir"):
             self.out_dir = argparse_ns.out_dir
-        for f in ("ace", "system", "gold", "erg", "system_edm", "gold_edm"):
+        for f in ("ace", "system", "gold", "erg", "system_edm", "gold_edm", "abstract"):
             if hasattr(argparse_ns, f):
                 self._files[f] = getattr(argparse_ns, f)
 
@@ -206,14 +257,15 @@ class Processor(object):
         return ret
 
     def edm_post_process(self):
-        self.link_args()
-        self.align_edm()
+        self.edm_link_args()
+        self.edm_align()
+        self.edm_analyze()
 
-    def link_args(self):
+    def edm_link_args(self):
         for i in range(len(self._system_edm)):
-            self._system_edm[i].link_args()
+            self._system_edm[i].edm_link_args()
 
-    def align_edm(self):
+    def edm_align(self):
         assert len(self._gold_edm) == len(self._system_edm), "same length"
         for i in range(len(self._gold_edm)):
             self._gold_edm[i].align_with(self._system_edm[i])
@@ -235,6 +287,7 @@ class Processor(object):
     def load_erg(self):
         if self.erg is None:
             self.erg = Erg(self._files["erg"])
+            self.erg.parse(self._files["abstract"])
 
     def to_json(self, indent=2):
         assert(len(self.mrs) == len(self.system))
@@ -261,7 +314,7 @@ class Processor(object):
                      "dmrs": xmrs.Dmrs.to_dict(self.system[i]['dmrs'], properties=True)})
                 readings += 1
             if len(self._gold_edm) != 0 and len(self._gold_edm) == len(self._system_edm):
-                result["results"].append({"result-id": "EDM", "edm": self._edm_compare[i]})
+                result["results"].append({"result-id": "EDM", "edm": self._edm_compare_result[i]})
                 readings += 1
             result["readings"] = readings
             file_outpath = os.path.join(self.out_dir, "n%s.json" % i)
@@ -350,20 +403,20 @@ class Processor(object):
         self.system = self.parse_amr_file(input)
         self.system_error = len([s for s in self.system if s.get('dmrs') is None])
 
-    def analyze(self):
-        self.system_gold_compare()
+    def edm_analyze(self):
+        self.edm_system_gold_compare()
 
     def validate_args(self, system, index, predicate):
         # print predicate
         assert self.erg is not None, "erg defined"
         assert predicate in self.erg, "predicate in erg"
-        return 0
+        return system.match_args(index, predicate, self.erg)
 
-    def system_gold_compare(self):
+    def edm_system_gold_compare(self):
         assert len(self._gold_edm) == len(self._system_edm), "same length"
         for i in range(len(self._gold_edm)):
             d = self._edm_dict(i, self._gold_edm[i], self._system_edm[i])
-            self._edm_compare.append(d)
+            self._edm_compare_result.append(d)
 
     def _edm_dict(self, i, gold, system):
         gold_set = set([k for k in gold._entries.iterkeys()])
@@ -398,8 +451,14 @@ class Processor(object):
                     elif prefix == "system":
                         if predicate not in self.erg:
                             stats['predicate'] += 1
-                        elif not self.validate_args(system, index, predicate):
-                            stats['predicate_arg'] += 1
+                        else:
+                            pred_errors = self.validate_args(system, index, predicate)
+                            if len(pred_errors) > 0:
+                                stats['predicate_arg'] += 1
+                                if "predicate_errors" not in stats:
+                                    stats['predicate_errors'] = defaultdict(int)
+                                for name, count in pred_errors.iteritems():
+                                    stats['predicate_errors'][name] += count
             stats_update("system", system_index_predicates - gold_index_predicates)
             stats_update("gold", gold_index_predicates - system_index_predicates)
 
@@ -410,7 +469,7 @@ def process_main(ns):
 
 def process_main_error(ns):
     p = Processor(ns)
-    p.analyze()
+    p.edm_analyze()
 
 def process_main_edm(ns):
     p = Processor(ns)
@@ -423,7 +482,6 @@ def process_main_erg(ns):
 def process_main_json(ns):
     p = Processor(ns)
     p.load_json()
-    p.analyze()
     p.to_json()
     print "total: %d gold: {%d/%d} system: {%d/%d}" % (
         len(p.mrs),
@@ -449,6 +507,8 @@ def main(args=sys.argv[1:]):
     parser_json.add_argument('--out_dir', type=str, default="../webpage/data/")
     parser_json.add_argument('--erg', type=argparse.FileType('r'),
             default="../../erg1214/etc/surface.smi")
+    parser_json.add_argument('--abstract', type=argparse.FileType('r'),
+            default="../../erg1214/etc/abstract.smi")
     parser_json.set_defaults(func=process_main_json)
 
     parser_error = subparsers.add_parser("error")
@@ -463,13 +523,16 @@ def main(args=sys.argv[1:]):
             default="../../error-analysis-data/dev.system.dmrs.edm")
     parser_edm.add_argument('--erg', type=argparse.FileType('r'),
             default="../../erg1214/etc/surface.smi")
+    parser_edm.add_argument('--abstract', type=argparse.FileType('r'),
+            default="../../erg1214/etc/abstract.smi")
     parser_edm.set_defaults(func=process_main_edm)
 
     parser_erg = subparsers.add_parser("erg")
     parser_erg.add_argument('--erg', type=argparse.FileType('r'),
             default="../../erg1214/etc/surface.smi")
+    parser_erg.add_argument('--abstract', type=argparse.FileType('r'),
+            default="../../erg1214/etc/abstract.smi")
     parser_erg.set_defaults(func=process_main_erg)
-
 
     parser.set_defaults(func=process_main)
     ns = parser.parse_args(args)

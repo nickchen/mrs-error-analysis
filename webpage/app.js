@@ -315,6 +315,37 @@ function Result(result, parent) {
           }
         });
     }
+    if (self.data.summary) {
+      var $stat = self.data.summary;
+      var $edm = $(Templates.edm({total: $stat.total,
+                                  gold: $stat.gold,
+                                  system: $stat.system,
+                                  common: $stat.common,
+                                  predicate: $stat.predicate,
+                                  predicate_arg: $stat.predicate_arg})).appendTo($inner);
+      $.each($stat, function(name, value) {
+        var system_stats = ["named", "unknown", "compound", "udef_q", "proper_q", "subord", "card", "yofc"];
+        var type_array = ["system", "gold"];
+        if (name === "predicate_errors") {
+          $.each(value, function(sname, svalue) {
+            $($edm).find("#mismatch_row").after(
+              $(Templates.stat_entry({name: sname, value: svalue})));
+          });
+        } else {
+          for (var i = 0; i < type_array.length; i++) {
+            var type_str = type_array[i];
+            if (name.indexOf(type_str) === 0) {
+              var vname = name.substring(type_str.length + 1);
+              if (system_stats.indexOf(vname) > -1) {
+                $($edm).find("#" + type_str + "_row").after(
+                  $(Templates.stat_entry({name: vname, value: value})));
+              }
+            }
+          }
+        }
+      });
+
+    }
 
 
     //Add various event bindings to things in the visualisations
@@ -392,7 +423,7 @@ function doResults(data) {
 }
 
 
-var MAX = 1769;
+var MAX = 1797;
 function updateLinks(index, edm_diff_only) {
   var previous = parseInt(index) - 1;
   var next = parseInt(index) + 1;
@@ -400,7 +431,7 @@ function updateLinks(index, edm_diff_only) {
   if (previous === -1) {
       previous = MAX;
   }
-  if (next >= MAX) {
+  if (next > MAX) {
       next = 0;
   }
   href_common = "?edm_diff_only=";

@@ -9,7 +9,7 @@ import traceback
 import shlex
 import re
 
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from functools import partial
 
 from delphin.codecs import simplemrs
@@ -158,7 +158,6 @@ class EdmPredicate(object):
                 # XXX assume "x" is wildcard
                 if len(set(erg_level_types) & set(arg_predicate_types)) == 0 and not "x" in arg_predicate_types:
                     errors["%s incorrect - %s" % (arg_name, predicate_str)] += 1
-                    # print arg_name, arg_level, arg_predicate
             else:
                 errors["%s extra - %s" % (arg_name, predicate_str)] += 1
         # print errors
@@ -293,9 +292,19 @@ class Processor(object):
             self.erg = Erg(self._files["erg"])
             self.erg.parse(self._files["abstract"])
 
+    def merge_dict(self, dst, src):
+        for name, value in src.iteritems():
+            if isinstance(value, int):
+                dst[name] += value
+            else:
+                if name not in dst:
+                    dst[name] = defaultdict(int)
+                self.merge_dict(dst[name], value)
+
     def to_json(self, indent=2):
         assert(len(self.mrs) == len(self.system))
         assert(len(self.mrs) == len(self.gold))
+        edm_summary = defaultdict(int)
         for i in range(len(self.mrs)):
             readings = 0
             result = {
@@ -320,10 +329,24 @@ class Processor(object):
             if len(self._gold_edm) != 0 and len(self._gold_edm) == len(self._system_edm):
                 result["results"].append({"result-id": "EDM", "edm": self._edm_compare_result[i]})
                 readings += 1
+                self.merge_dict(edm_summary, result["results"][-1]["edm"]["stats"])
             result["readings"] = readings
             file_outpath = os.path.join(self.out_dir, "n%s.json" % i)
             with open(file_outpath, "w") as f:
                 f.write(json.dumps(result, indent=indent))
+        result = {
+            "input" : "",
+            "results" : [],
+        }
+        # python -m SimpleHTTPServer 8000
+        predicate_errors = OrderedDict()
+        for key in sorted(edm_summary['predicate_errors'].iterkeys()):
+            predicate_errors[key] = edm_summary['predicate_errors'][key]
+        edm_summary['predicate_errors'] = predicate_errors
+        result["results"].append({"result-id": "Summary", "summary": edm_summary})
+        file_outpath = os.path.join(self.out_dir, "n%s.json" % (len(self.mrs)))
+        with open(file_outpath, "w") as f:
+            f.write(json.dumps(result, indent=indent))
 
     def convert_mrs(self, mrs, properties=True, indent=None):
         if len(mrs) == 1:

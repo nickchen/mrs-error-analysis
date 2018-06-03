@@ -181,14 +181,24 @@ function update_type_stats(type_str, $stat, $edm) {
     var stats_class = type_str + "_row";
     var $html = $($edm).find("#all_stats");
 
-    var sub_array = ["total", "surface", "abstract"];
-    for (var i = 0; i < sub_array.length; i++) {
-      var sub_str = sub_array[i];
-      if (sub_str in $stat["not in other"]) {
-        $html.append(
-          $(Templates.stat_entry({name: capitalizeFirstLetter(sub_str),
-              padding: "&nbsp;&nbsp;", stat_class: "",
-              value: $stat["not in other"][sub_str]})));
+    if ("not in other" in $stat) {
+      var sub_array = ["surface", "abstract", "total"];
+      for (var i = 0; i < sub_array.length; i++) {
+        var sub_str = sub_array[i];
+        if (sub_str in $stat["not in other"]) {
+          $html.append(
+            $(Templates.stat_entry({name: capitalizeFirstLetter(sub_str),
+                padding: "&nbsp;&nbsp;", stat_class: "",
+                value: $stat["not in other"][sub_str]})));
+        }
+      }
+      if ("predicates" in $stat["not in other"]) {
+        $.each($stat["not in other"]["predicates"], function(name, value) {
+          $html.append(
+            $(Templates.stat_entry({name: name,
+                padding: "|&nbsp;&nbsp;&nbsp;&nbsp;", stat_class: "",
+                value: value})));
+        });
       }
     }
     if ("unknown" in $stat) {
@@ -201,14 +211,14 @@ function update_type_stats(type_str, $stat, $edm) {
       $html.append(
         $(Templates.stat_entry({name: "Not in ERG",
             padding: "&nbsp;&nbsp;", stat_class: "",
-            value: $stat["not in erg"]})));
-    }
-    if ("not in other" in $stat && "predicates" in $stat["not in other"]) {
-      $.each($stat["not in other"]["predicates"], function(name, value) {
-        $html.append(
-          $(Templates.stat_entry({name: name,
-              padding: "|&nbsp;&nbsp;&nbsp;&nbsp;", stat_class: "",
-              value: value})));
+            value: $stat["not in erg"]["count"]})));
+      $.each($stat["not in erg"], function(name, value) {
+        if (name !== "count") {
+          $html.append(
+            $(Templates.stat_entry({name: name,
+                padding: "&nbsp;&nbsp;&nbsp;&nbsp;", stat_class: "",
+                value: value})));
+        }
       });
     }
 

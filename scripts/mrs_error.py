@@ -159,8 +159,9 @@ class EdmPredicate(object):
     def erg_pred_types_at_level(self, arg_level, erg_dict):
         erg_level_types = set()
         for pred in self.predicates:
-            erg_pred = erg_dict[pred]
-            erg_level_types.update(erg_pred.level_args(arg_level))
+            if pred in erg_dict:
+                erg_pred = erg_dict[pred]
+                erg_level_types.update(erg_pred.level_args(arg_level))
         return erg_level_types
 
     def validate_args(self, predicate_str, erg_dict):
@@ -191,6 +192,8 @@ class EdmPredicate(object):
                     errors[predicate_str] += 1
                     errors["count"] += 1
             else:
+                print arg_name, predicate_str
+                assert predicate_str in erg_dict, "in erg"
                 # extra arg - accounting
                 errors.restart(["extra"])
                 errors["count"] += 1

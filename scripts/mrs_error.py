@@ -147,7 +147,7 @@ class EdmPredicate(object):
                         already_yield.append(arg_name)
 
     def match_args(self, predicate_str, erg_dict):
-        errors = defaultdict(int)
+        errors = StatsKeeper()
         erg_pred = erg_dict[predicate_str]
         for arg_name, arg_level, arg_predicate in self.external_args():
             erg_level_types = erg_pred.level_args(arg_level)
@@ -157,9 +157,17 @@ class EdmPredicate(object):
                 arg_predicate_types = arg_predicate.get_types(erg_dict)
                 # XXX assume "x" is wildcard
                 if len(set(erg_level_types) & set(arg_predicate_types)) == 0 and not "x" in arg_predicate_types:
-                    errors["%s incorrect - %s" % (arg_name, predicate_str)] += 1
+                    errors.restart(["incorrect"])
+                    errors["count"] += 1
+                    errors.restart(["incorrect", arg_name])
+                    errors[predicate_str] += 1
+                    errors["count"] += 1
             else:
-                errors["%s extra - %s" % (arg_name, predicate_str)] += 1
+                errors.restart(["extra"])
+                errors["count"] += 1
+                errors.restart(["extra", arg_name])
+                errors[predicate_str] += 1
+                errors["count"] += 1
         # print errors
         return errors
 
@@ -212,6 +220,68 @@ class EdmContainer(object):
         predicate = self._entries[index]
         return predicate.match_args(predicate_str, erg)
 
+class StatsKeeper(object):
+    def __init__(self):
+        self._stats = {}
+        self._node = self._stats
+
+    def push(self, key):
+        if key not in self._node:
+            self._node[key] = defaultdict(int)
+        self._node = self._node[key]
+
+    def restart(self, keys):
+        self._node = self._stats
+        for key in keys:
+            self.push(key)
+
+    def __getitem__(self, key):
+        return self._node[key]
+
+    def __setitem__(self, key, value):
+        self._node[key] = value
+
+    def merge(self, other):
+        StatsKeeper.merge_dict(self._stats, other._stats)
+
+    def merge_node(self, other):
+        StatsKeeper.merge_dict(self._node, other._stats)
+
+    def to_dict(self):
+        return self._stats
+
+    def trim(self, keys, limit=50):
+        self.restart(keys[0:-1])
+        # replacement
+        last = keys[-1]
+        self._node[last] = self._sort_limit(self._node[last], limit)
+
+    def _sort_limit(self, node, limit):
+        r = OrderedDict()
+        for k in sorted(node.iterkeys(), key=lambda k: node[k], reverse=True):
+            if limit > node[k]:
+                break
+            r[k] = node[k]
+            if isinstance(r[k], dict):
+                r[k] = self._sort_limit(r[k], limit)
+        return r
+
+    def sort(self, keys):
+        self.trim(keys, 0)
+
+    def has_error(self):
+        return len(self._node) > 0
+
+    @staticmethod
+    def merge_dict(dst, src):
+        for name, value in src.iteritems():
+            if isinstance(value, int):
+                dst[name] += value
+            else:
+                if name not in dst:
+                    dst[name] = defaultdict(int)
+                StatsKeeper.merge_dict(dst[name], value)
+
 class Processor(object):
     def __init__(self, argparse_ns):
         self.__package_amr_loads = partial(penman.loads, model=xmrs.Dmrs)
@@ -221,6 +291,7 @@ class Processor(object):
         self.system = []
         self._system_edm = []
         self._edm_compare_result = []
+        self._stats = []
         self.out_dir = None
         self._files = {}
         self._limit = argparse_ns.limit
@@ -292,19 +363,10 @@ class Processor(object):
             self.erg = Erg(self._files["erg"])
             self.erg.parse(self._files["abstract"])
 
-    def merge_dict(self, dst, src):
-        for name, value in src.iteritems():
-            if isinstance(value, int):
-                dst[name] += value
-            else:
-                if name not in dst:
-                    dst[name] = defaultdict(int)
-                self.merge_dict(dst[name], value)
-
     def to_json(self, indent=2):
         assert(len(self.mrs) == len(self.system))
         assert(len(self.mrs) == len(self.gold))
-        edm_summary = defaultdict(int)
+        edm_summary = StatsKeeper()
         for i in range(len(self.mrs)):
             readings = 0
             result = {
@@ -327,9 +389,10 @@ class Processor(object):
                      "dmrs": xmrs.Dmrs.to_dict(self.system[i]['dmrs'], properties=True)})
                 readings += 1
             if len(self._gold_edm) != 0 and len(self._gold_edm) == len(self._system_edm):
+                stats = self._stats[i]
                 result["results"].append({"result-id": "EDM", "edm": self._edm_compare_result[i]})
                 readings += 1
-                self.merge_dict(edm_summary, result["results"][-1]["edm"]["stats"])
+                edm_summary.merge(stats)
             result["readings"] = readings
             file_outpath = os.path.join(self.out_dir, "n%s.json" % i)
             with open(file_outpath, "w") as f:
@@ -339,11 +402,10 @@ class Processor(object):
             "results" : [],
         }
         # python -m SimpleHTTPServer 8000
-        predicate_errors = OrderedDict()
-        for key in sorted(edm_summary['predicate_errors'].iterkeys()):
-            predicate_errors[key] = edm_summary['predicate_errors'][key]
-        edm_summary['predicate_errors'] = predicate_errors
-        result["results"].append({"result-id": "Summary", "summary": edm_summary})
+        edm_summary.trim(["gold_stats", "not in other", "predicates"])
+        edm_summary.trim(["system_stats", "not in other", "predicates"])
+        edm_summary.sort(["system_stats", "predicate errors"])
+        result["results"].append({"result-id": "Summary", "summary": edm_summary.to_dict()})
         file_outpath = os.path.join(self.out_dir, "n%s.json" % (len(self.mrs)))
         with open(file_outpath, "w") as f:
             f.write(json.dumps(result, indent=indent))
@@ -442,15 +504,19 @@ class Processor(object):
     def edm_system_gold_compare(self):
         assert len(self._gold_edm) == len(self._system_edm), "same length"
         for i in range(len(self._gold_edm)):
-            d = self._edm_dict(i, self._gold_edm[i], self._system_edm[i])
-            self._edm_compare_result.append(d)
+            (predicates, stats) = self.compare(i, self._gold_edm[i], self._system_edm[i])
+            self._stats.append(stats)
+            self._edm_compare_result.append({'predicates': predicates, 'stats': stats.to_dict()})
 
-    def _edm_dict(self, i, gold, system):
+    def compare(self, i, gold, system):
         gold_set = set([k for k in gold._entries.iterkeys()])
         system_set = set([k for k in system._entries.iterkeys()])
         predicates = {}
-        stats = defaultdict(int)
+        shared_stat_key = "shared"
+        not_in_stat_key = "not in other"
+        stats = StatsKeeper()
         for index in list(gold_set | system_set):
+            stats.restart(["shared"])
             pred = gold._entries[index] if index in gold._entries else system._entries[index]
             predicates[index] = {
                 "start": pred.start,
@@ -471,25 +537,29 @@ class Processor(object):
                 predicates[index]["predicate"]["system"] = list(system_index_predicates)
             def stats_update(prefix, predicates):
                 for predicate in predicates:
+                    stats.restart([prefix])
                     if predicate.endswith("unknown"):
-                        stats["%s_%s"% (prefix, 'unknown')] += 1
-                    elif predicate in ['compound', 'udef_q', 'proper_q', 'yofc', 'named', 'subord', 'card']:
-                        stats["%s_%s"% (prefix, predicate)] += 1
-                    elif prefix == "system":
+                        stats['unknown'] += 1
+                    else:
+                        stats.restart([prefix, not_in_stat_key])
+                        stats["total"] += 1
+                        stats["surface" if predicate.startswith("_") else "abstract"] += 1
+                        stats.restart([prefix, not_in_stat_key, "predicates"])
+                        stats[predicate] += 1
+
+                    if prefix == "system_stats" and predicate.startswith("_"):
+                        stats.restart([prefix])
                         if predicate not in self.erg:
-                            stats['predicate'] += 1
+                            stats["not in erg"] += 1
                         else:
                             pred_errors = self.validate_args(system, index, predicate)
-                            if len(pred_errors) > 0:
-                                stats['predicate_arg'] += 1
-                                if "predicate_errors" not in stats:
-                                    stats['predicate_errors'] = defaultdict(int)
-                                for name, count in pred_errors.iteritems():
-                                    stats['predicate_errors'][name] += count
-            stats_update("system", system_index_predicates - gold_index_predicates)
-            stats_update("gold", gold_index_predicates - system_index_predicates)
-
-        return {'predicates': predicates, 'stats': stats}
+                            if pred_errors.has_error() > 0:
+                                stats['predicate with incorrect arg'] += 1
+                                stats.push("predicate errors")
+                                stats.merge_node(pred_errors)
+            stats_update("system_stats", system_index_predicates - gold_index_predicates)
+            stats_update("gold_stats", gold_index_predicates - system_index_predicates)
+        return predicates, stats
 
 def process_main(ns):
     p = Processor(ns)

@@ -4,7 +4,7 @@
 .system {
     color: red;
 }
-.common, .gold, .system {
+.common, .gold, .system, .unique {
   fill: #000;
   stroke: none;
   stroke-width: 1px;

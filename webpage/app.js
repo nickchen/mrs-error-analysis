@@ -32,13 +32,9 @@ Templates.edm = [
     '<div name="test">',
       '<div><a href="#" id="edm_option" class="btn btn-primary btn-sm" role="button" aria-pressed="true"></a></div>',
         '<div><span class="common">Common</span>/<span class="gold">Gold Only</span>/<span class="system">System Only</span></div>',
-        '<div><table class="edm edm_table edm_stats">',
+        '<div><table id="all_stats" class="edm edm_table edm_stats">',
           '<tr><th>Total</th><td class="stats_value"><%= total %></td></tr>',
           '<tr><th>Common </th><td class="stats_value"><%= common %></td></tr>',
-          '<tr id="gold_row"><th>Gold Unique</th><td class="stats_value"><%= gold %></td></tr>',
-          '<tr id="system_row"><th>System Unique</th><td class="stats_value"><%= system %></td></tr>',
-          '<tr><th>Predicate not in Surface</th><td class="stats_value"><%= predicate %></td></tr>',
-          '<tr id="mismatch_row"><th>Predicate Arg Mismatch</th><td class="stats_value"><%= predicate_arg %></td></tr>',
           '</table></div>',
         '<table class="edm edm_table">',
           '<tr>',
@@ -61,7 +57,7 @@ Templates.edm_entry = [
 ].join("\n");
 
 Templates.stat_entry = [
-    '<tr><th>&nbsp;&nbsp;<%= name %></th><td><%= value %></td></tr>'].join("\n");
+    '<tr class="<%=stat_class%>"><th><%= padding %><%= name %></th><td><%= value %></td></tr>'].join("\n");
 
 Templates.successStatus = [
     '<p id="parse-status">Showing <%= numResults %> of <%= readings %> analyses.</p>',
@@ -177,7 +173,92 @@ function setInlineStyles(svg, emptySvgDeclarationComputed) {
     }
 }
 
+function capitalizeFirstLetter(string) {
+    return string.charAt(0).toUpperCase() + string.slice(1);
+}
 
+function update_type_stats(type_str, $stat, $edm) {
+    var stats_class = type_str + "_row";
+    var $html = $($edm).find("#all_stats");
+
+    var sub_array = ["total", "surface", "abstract"];
+    for (var i = 0; i < sub_array.length; i++) {
+      var sub_str = sub_array[i];
+      if (sub_str in $stat["not in other"]) {
+        $html.append(
+          $(Templates.stat_entry({name: capitalizeFirstLetter(sub_str),
+              padding: "&nbsp;&nbsp;", stat_class: "",
+              value: $stat["not in other"][sub_str]})));
+      }
+    }
+    if ("unknown" in $stat) {
+      $html.append(
+        $(Templates.stat_entry({name: "Unknown",
+            padding: "&nbsp;&nbsp;", stat_class: "",
+            value: $stat["unknown"]})));
+    }
+    if ("not in erg" in $stat) {
+      $html.append(
+        $(Templates.stat_entry({name: "Not in ERG",
+            padding: "&nbsp;&nbsp;", stat_class: "",
+            value: $stat["not in erg"]})));
+    }
+    if ("not in other" in $stat && "predicates" in $stat["not in other"]) {
+      $.each($stat["not in other"]["predicates"], function(name, value) {
+        $html.append(
+          $(Templates.stat_entry({name: name,
+              padding: "|&nbsp;&nbsp;&nbsp;&nbsp;", stat_class: "",
+              value: value})));
+      });
+    }
+
+    if ("predicate errors" in $stat) {
+      var error_types = ["incorrect", "extra"];
+      for (var i = 0; i < error_types.length; i++) {
+        var error_str = error_types[i];
+        if (error_str in $stat["predicate errors"]) {
+          $html.append(
+            $(Templates.stat_entry({name: capitalizeFirstLetter(error_str) + " ARG",
+                padding: "&nbsp;&nbsp;", stat_class: stats_class,
+                value: $stat["predicate errors"][error_str]["count"]})));
+
+            $.each($stat["predicate errors"][error_str], function(name, value) {
+              if (value instanceof Object) {
+                $html.append(
+                  $(Templates.stat_entry({name: name,
+                      padding: "&nbsp;&nbsp;&nbsp;&nbsp;", stat_class: "",
+                      value: $stat["predicate errors"][error_str][name]["count"]})));
+                $.each(value, function(k, v) {
+                  if (k !== "count") {
+                    $html.append(
+                      $(Templates.stat_entry({name: k,
+                          padding: "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;", stat_class: "",
+                          value: v})));
+                  }
+                });
+              }
+            });
+        }
+      }
+    }
+}
+
+function update_stats($stat, $edm) {
+  var type_array = ["gold", "system"];
+  var $html = $($edm).find("#all_stats");
+  for (var i = 0; i < type_array.length; i++) {
+    var type_str = type_array[i];
+    console.log(type_str + " " + type_array[i]);
+    $html.append(
+      $(Templates.stat_entry({name: capitalizeFirstLetter(type_array[i]) + " Only",
+          padding: "", stat_class: "",
+          value: $stat.shared[type_str]})));
+    var type_stat = $stat[type_str + "_stats"];
+    if (type_stat !== undefined) {
+      update_type_stats(type_str, type_stat, $edm);
+    }
+  }
+}
 function Result(result, parent) {
     var resultId = result['result-id'];
     var $path = window.location.pathname;
@@ -286,65 +367,18 @@ function Result(result, parent) {
     }
     if (self.data.edm) {
         var $stat = self.data.edm.stats;
-        var $edm = $(Templates.edm({total: $stat.total,
-                                    gold: $stat.gold,
-                                    system: $stat.system,
-                                    common: $stat.common,
-                                    predicate: $stat.predicate,
-                                    predicate_arg: $stat.predicate_arg})).appendTo($inner);
+        var $edm = $(Templates.edm({total: $stat.shared.total,
+                                    common: $stat.shared.common})).appendTo($inner);
         self.edm = EDM($edm, self.data.edm);
-        $.each($stat, function(name, value) {
-          var system_stats = ["named", "unknown", "compound", "udef_q", "proper_q", "subord", "card", "yofc"];
-          var type_array = ["system", "gold"];
-          if (name === "predicate_errors") {
-            $.each(value, function(sname, svalue) {
-              $($edm).find("#mismatch_row").after(
-                $(Templates.stat_entry({name: sname, value: svalue})));
-            });
-          } else {
-            for (var i = 0; i < type_array.length; i++) {
-              var type_str = type_array[i];
-              if (name.indexOf(type_str) === 0) {
-                var vname = name.substring(type_str.length + 1);
-                if (system_stats.indexOf(vname) > -1) {
-                  $($edm).find("#" + type_str + "_row").after(
-                    $(Templates.stat_entry({name: vname, value: value})));
-                }
-              }
-            }
-          }
-        });
+        update_stats($stat, $edm);
     }
     if (self.data.summary) {
       var $stat = self.data.summary;
-      var $edm = $(Templates.edm({total: $stat.total,
-                                  gold: $stat.gold,
-                                  system: $stat.system,
-                                  common: $stat.common,
-                                  predicate: $stat.predicate,
+      var $edm = $(Templates.edm({total: $stat.shared.total,
+                                  common: $stat.shared.common,
+                                  predicate: $stat.shared.predicate,
                                   predicate_arg: $stat.predicate_arg})).appendTo($inner);
-      $.each($stat, function(name, value) {
-        var system_stats = ["named", "unknown", "compound", "udef_q", "proper_q", "subord", "card", "yofc"];
-        var type_array = ["system", "gold"];
-        if (name === "predicate_errors") {
-          $.each(value, function(sname, svalue) {
-            $($edm).find("#mismatch_row").after(
-              $(Templates.stat_entry({name: sname, value: svalue})));
-          });
-        } else {
-          for (var i = 0; i < type_array.length; i++) {
-            var type_str = type_array[i];
-            if (name.indexOf(type_str) === 0) {
-              var vname = name.substring(type_str.length + 1);
-              if (system_stats.indexOf(vname) > -1) {
-                $($edm).find("#" + type_str + "_row").after(
-                  $(Templates.stat_entry({name: vname, value: value})));
-              }
-            }
-          }
-        }
-      });
-
+      update_stats($stat, $edm);
     }
 
 

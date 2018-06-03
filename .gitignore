@@ -6,3 +6,4 @@ webpage/.DS_Store
 webpage/edm.html
 sync.sh
 *.json
+scripts/mrs_error.py.bak

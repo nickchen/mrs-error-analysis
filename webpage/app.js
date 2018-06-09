@@ -177,6 +177,16 @@ function capitalizeFirstLetter(string) {
     return string.charAt(0).toUpperCase() + string.slice(1);
 }
 
+function number_and_percentage(value, total) {
+  if (value != total) {
+    var v = Number.parseInt(value),
+        t = Number.parseInt(total);
+    var precentage = ((v / t) * 100).toFixed(2) + '%';
+    return "(" + precentage + ") " + value;
+  }
+  return value;
+}
+
 function update_type_stats(type_str, $stat, $edm) {
     var stats_class = type_str + "_row";
     var $html = $($edm).find("#all_stats");
@@ -189,7 +199,8 @@ function update_type_stats(type_str, $stat, $edm) {
           $html.append(
             $(Templates.stat_entry({name: capitalizeFirstLetter(sub_str),
                 padding: "&nbsp;&nbsp;", stat_class: "",
-                value: $stat["not in other"][sub_str]})));
+                value: number_and_percentage($stat["not in other"][sub_str], $stat["not in other"]["total"]),
+              })));
         }
       }
       if ("predicates" in $stat["not in other"]) {
@@ -197,7 +208,7 @@ function update_type_stats(type_str, $stat, $edm) {
           $html.append(
             $(Templates.stat_entry({name: name,
                 padding: "|&nbsp;&nbsp;&nbsp;&nbsp;", stat_class: "",
-                value: value})));
+                value: number_and_percentage(value, $stat["not in other"]["total"])})));
         });
       }
     }
@@ -217,7 +228,7 @@ function update_type_stats(type_str, $stat, $edm) {
           $html.append(
             $(Templates.stat_entry({name: name,
                 padding: "&nbsp;&nbsp;&nbsp;&nbsp;", stat_class: "",
-                value: value})));
+                value: number_and_percentage(value, $stat["not in erg"]["count"])})));
         }
       });
     }
@@ -231,13 +242,13 @@ function update_type_stats(type_str, $stat, $edm) {
             $(Templates.stat_entry({name: capitalizeFirstLetter(error_str) + " ARG",
                 padding: "&nbsp;&nbsp;", stat_class: stats_class,
                 value: $stat["predicate errors"][error_str]["count"]})));
-
+            var subtotal = $stat["predicate errors"][error_str]["count"];
             $.each($stat["predicate errors"][error_str], function(name, value) {
               if (value instanceof Object) {
                 $html.append(
                   $(Templates.stat_entry({name: name,
                       padding: "&nbsp;&nbsp;&nbsp;&nbsp;", stat_class: "",
-                      value: $stat["predicate errors"][error_str][name]["count"]})));
+                      value: number_and_percentage($stat["predicate errors"][error_str][name]["count"], subtotal)})));
                 $.each(value, function(k, v) {
                   if (k !== "count") {
                     $html.append(

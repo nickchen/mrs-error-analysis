@@ -241,6 +241,15 @@ class EdmContainer(object):
         self._sentence_index = index
         self._entries = {}
         self._stats = StatsKeeper()
+        self._align = {}
+
+    def predicate_dict_set(self):
+        d = defaultdict(set)
+        for index, predicate in self._entries.iteritems():
+            ps = [p for p in predicate.predicates.iterkeys()]
+            if len(ps) > 0:
+                d[index].update(ps)
+        return d
 
     def parse(self, line):
         for item in line.split(";"):
@@ -280,6 +289,7 @@ class EdmContainer(object):
                 if other_key in other._entries:
                     other_pc = other._entries[other_key]
                     del other._entries[other_key]
+                    other._align[other_key] = index
                     if index not in other._entries:
                         other._entries[index] = other_pc
                         other_pc.start = self_pc.start
@@ -380,9 +390,9 @@ class Entry(object):
         self._gold_edm = None
         self._system_edm = None
         self._edm_compare_result = None
-        self._system_arm = None
-        self._gold_arm = None
-        self._stats = None
+        self._system_amr = None
+        self._gold_amr = None
+        self._stats = StatsKeeper()
 
     def edm_link_args(self):
         self._system_edm.edm_link_args()
@@ -391,10 +401,47 @@ class Entry(object):
         assert self._gold_edm is not None and self._system_edm is not None, "edm parsed"
         self._gold_edm.align_with(self._system_edm)
 
+    def dmrs_predicate_dict_set(self, dmrs, align):
+        d = {}
+        for i, t, val in dmrs.to_triples():
+            if i not in d:
+                d[i] = {'predicate': [], 'link': None}
+            if t == "predicate":
+                d[i]['predicate'].append(val)
+            elif t == "lnk":
+                assert d[i]['link'] is None
+                index = val[2:-2]
+                if index in align:
+                    index = align[index]
+                d[i]['link'] = index
+        dd = defaultdict(set)
+        for i, v in d.iteritems():
+            if v['link'] is not None and len(v['predicate']) > 0:
+                dd[v['link']].update(v['predicate'])
+        return dd
+
+    def compare_predicates(self):
+        if "dmrs" in self._system_amr:
+            amr = self.dmrs_predicate_dict_set(self._system_amr['dmrs'], self._system_edm._align)
+            edm = self._system_edm.predicate_dict_set()
+            amr_keys = set([k for k in amr.iterkeys()])
+            edm_keys = set([k for k in edm.iterkeys()])
+            for k in (amr_keys - edm_keys):
+                self._stats.restart(["system_stats", "format disagreement"])
+                self._stats["in arm not edm"] += len(amr[k])
+            for k in (edm_keys - amr_keys):
+                self._stats.restart(["system_stats", "format disagreement"])
+                self._stats["in edm not amr"] += len(edm[k])
+        else:
+            self._stats.restart(["system_stats", "format disagreement"])
+            self._stats["no dmrs"] += 1
+
+
     def edm_analyze(self, erg):
         assert self._gold_edm is not None and self._system_edm is not None, "edm parsed"
         predicates = self.compare(self._gold_edm, self._system_edm, erg)
         self._edm_compare_result = {'predicates': predicates, 'stats': self._stats.to_dict()}
+        self.compare_predicates()
 
     def compare(self, gold, system, erg):
         gold_set = set([k for k in gold._entries.iterkeys()])
@@ -402,7 +449,6 @@ class Entry(object):
         predicates = {}
         shared_stat_key = "shared"
         not_in_stat_key = "not in other"
-        self._stats = StatsKeeper()
         for index in list(gold_set | system_set):
             self._stats.restart(["shared"])
             pred = gold._entries[index] if index in gold._entries else system._entries[index]
@@ -465,15 +511,15 @@ class Entry(object):
                 {"result-id": "ACE MRS",
                  "mrs": xmrs.Mrs.to_dict(self.mrs['mrs'], properties=True)})
             readings += 1
-        if 'dmrs' in self._gold_arm:
+        if 'dmrs' in self._gold_amr:
             result["results"].append(
                 {"result-id": "Gold DMRS (convert from penman)",
-                 "dmrs": xmrs.Dmrs.to_dict(self._gold_arm['dmrs'], properties=True)})
+                 "dmrs": xmrs.Dmrs.to_dict(self._gold_amr['dmrs'], properties=True)})
             readings += 1
-        if 'dmrs' in self._system_arm:
+        if 'dmrs' in self._system_amr:
             result["results"].append(
                 {"result-id": "System DMRS (convert from penman)",
-                 "dmrs": xmrs.Dmrs.to_dict(self._system_arm['dmrs'], properties=True)})
+                 "dmrs": xmrs.Dmrs.to_dict(self._system_amr['dmrs'], properties=True)})
             readings += 1
         if self._gold_edm is not None and self._system_edm is not None:
             result["results"].append({"result-id": "EDM", "edm": self._edm_compare_result})
@@ -557,9 +603,9 @@ class Processor(object):
 
     def load_json(self):
         self.parse_mrs(self._files["ace"])
-        self.load_edm()
         self.parse_amr_system(self._files["system"])
         self.parse_amr_gold(self._files["gold"])
+        self.load_edm()
 
     def load_erg(self):
         if self.erg is None:
@@ -651,10 +697,12 @@ class Processor(object):
         i = 0
         for lines in self._parse_amr_file_to_lines(input):
             amr = self.convert_amr(lines)
-            setattr(self.entries[i], attr, amr)
-            i += 1
-            if self._limit > 0 and i >= self._limit:
-                break
+            if amr is not None:
+                setattr(self.entries[i], attr, amr)
+                i += 1
+                if self._limit > 0 and i >= self._limit:
+                    break
+        assert i == len(self.entries)
 
     def parse_edm_gold(self, input):
         self.parse_edm_file(input, "_gold_edm")
@@ -663,10 +711,10 @@ class Processor(object):
         self.parse_edm_file(input, "_system_edm")
 
     def parse_amr_gold(self, input):
-        self.parse_amr_file(input, "_gold_arm")
+        self.parse_amr_file(input, "_gold_amr")
 
     def parse_amr_system(self, input):
-        self.parse_amr_file(input, "_system_arm")
+        self.parse_amr_file(input, "_system_amr")
 
 def process_main(ns):
     p = Processor(ns)
@@ -698,9 +746,9 @@ def main(args=sys.argv[1:]):
 
     parser_json = subparsers.add_parser("json")
     parser_json.add_argument('--system', type=argparse.FileType('r'),
-            default="../../error-analysis-data-2/dev.system.dmrs.amr")
+            default="../../error-analysis-data-2/dev.system.dmrs.amr.lnk")
     parser_json.add_argument('--gold', type=argparse.FileType('r'),
-            default="../../error-analysis-data-2/dev.gold.dmrs.amr")
+            default="../../error-analysis-data-2/dev.gold.dmrs.amr.lnk")
     parser_json.add_argument('--gold_edm', type=argparse.FileType('r'),
             default="../../error-analysis-data-2/dev.gold.edm.lab")
     parser_json.add_argument('--system_edm', type=argparse.FileType('r'),

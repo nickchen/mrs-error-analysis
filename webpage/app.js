@@ -191,6 +191,13 @@ function update_type_stats(type_str, $stat, $edm) {
     var stats_class = type_str + "_row";
     var $html = $($edm).find("#all_stats");
 
+    if ("format disagreement" in $stat) {
+      $.each($stat["format disagreement"], function(name, value) {
+        $html.append(
+          $(Templates.stat_entry({name: name,
+              padding: "&nbsp;&nbsp;", stat_class: "", value: value})));
+      });
+    }
     if ("not in other" in $stat) {
       var sub_array = ["surface", "abstract", "total"];
       for (var i = 0; i < sub_array.length; i++) {

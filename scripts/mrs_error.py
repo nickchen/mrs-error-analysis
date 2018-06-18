@@ -8,6 +8,7 @@ import penman as PM
 import traceback
 import shlex
 import re
+import networkx as nx
 
 from collections import defaultdict, OrderedDict
 from functools import partial
@@ -242,6 +243,7 @@ class EdmContainer(object):
         self._entries = {}
         self._stats = StatsKeeper()
         self._align = {}
+        self._edges = []
 
     def predicate_dict_set(self):
         d = defaultdict(set)
@@ -250,6 +252,13 @@ class EdmContainer(object):
             if len(ps) > 0:
                 d[index].update(ps)
         return d
+
+    def graph_verify(self):
+        G = nx.Graph()
+        G.add_edges_from(self._edges)
+        print nx.is_connected(G)
+        components = list(nx.connected_components(G))
+        print len(components)
 
     def parse(self, line):
         for item in line.split(";"):
@@ -267,6 +276,11 @@ class EdmContainer(object):
                     self._entries[index].append(typevalue)
                 elif typename == "CARG":
                     self._entries[index].carg.append(typevalue)
+                    # record edges for graph
+                if ":" in typevalue:
+                    self._edges.append((index, typevalue))
+                else:
+                    self._edges.append((index, index))
             else:
                 # 156:158 poss ARG1/EQ 163:173 _jetliners/nns_u_unknown_rel
                 (src_pred, src_arg, dst_index, dst_pred) = (tokens[1], tokens[2], tokens[3], tokens[4])
@@ -279,6 +293,7 @@ class EdmContainer(object):
                     self._entries[index].arg(src_pred, src_arg, dst_index, dst_pred)
                 else:
                     self._entries[dst_index].arg(src_pred, src_arg, index, dst_pred)
+                self._edges.append((index, dst_index))
 
     def align_with(self, other):
         """Using self as the model, make the other align with self"""
@@ -436,12 +451,22 @@ class Entry(object):
             self._stats.restart(["system_stats", "format disagreement"])
             self._stats["no dmrs"] += 1
 
+    def edm_graph_verify(self):
+        G = nx.Graph()
+        # self._system_edm.graph_verify()
+        G.add_edges_from(self._system_edm._edges)
+        if not nx.is_connected(G):
+            self._stats.restart(["system_stats", "format disagreement"])
+            self._stats["not connected"] += 1
+
 
     def edm_analyze(self, erg):
         assert self._gold_edm is not None and self._system_edm is not None, "edm parsed"
         predicates = self.compare(self._gold_edm, self._system_edm, erg)
         self._edm_compare_result = {'predicates': predicates, 'stats': self._stats.to_dict()}
         self.compare_predicates()
+        self.edm_graph_verify()
+
 
     def compare(self, gold, system, erg):
         gold_set = set([k for k in gold._entries.iterkeys()])

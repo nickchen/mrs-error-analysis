@@ -222,6 +222,7 @@ class EdmPredicateContainer(object):
                     errors["%s (%s)" % (predicate_str, arg_predicate.predicate)] += 1
                     errors["count"] += 1
             else:
+                # ERG does not have args at this level, consider extra
                 assert predicate_str in erg_dict, "in erg"
                 # extra arg - accounting
                 errors.restart(["extra"])
@@ -230,11 +231,6 @@ class EdmPredicateContainer(object):
                 errors[predicate_str] += 1
                 errors["count"] += 1
         return errors
-
-class Container(object):
-    def __init__(self, sentence, index):
-        self._sentence = sentence
-        self._sentence_index = index
 
 class EdmContainer(object):
     def __init__(self, sentence, index):
@@ -384,6 +380,9 @@ class StatsKeeper(object):
             return r
         return node
 
+    def has(self, key):
+        return key in self._node
+
     def has_error(self):
         return len(self._node) > 0
 
@@ -459,6 +458,25 @@ class Entry(object):
             self._stats.restart(["system_stats", "format disagreement"])
             self._stats["not connected"] += 1
 
+    def has_system_error(self):
+        self._stats.restart(["system_stats"])
+        return self._stats.has("predicate errors")
+
+    def has_system_error_extra_arg(self):
+        self._stats.restart(["system_stats"])
+        if self._stats.has("predicate errors"):
+            return "extra" in self._stats["predicate errors"]
+        return False
+
+    def has_system_error_incorrect_arg(self):
+        self._stats.restart(["system_stats"])
+        if self._stats.has("predicate errors"):
+            return "incorrect" in self._stats["predicate errors"]
+        return False
+
+    def is_matched(self):
+        self._stats.restart(["shared"])
+        return self._stats['total'] == self._stats['common']
 
     def edm_analyze(self, erg):
         assert self._gold_edm is not None and self._system_edm is not None, "edm parsed"
@@ -466,7 +484,23 @@ class Entry(object):
         self._edm_compare_result = {'predicates': predicates, 'stats': self._stats.to_dict()}
         self.compare_predicates()
         self.edm_graph_verify()
-
+        self._stats.restart(["summary"])
+        self._stats["count"] = 1
+        if self.is_matched():
+            self._stats.restart(["summary"])
+            self._stats["matched"] = 1
+        if self.has_system_error():
+            self._stats.restart(["summary"])
+            self._stats["has system error"] = 1
+        if self.has_system_error_incorrect_arg():
+            self._stats.restart(["summary"])
+            self._stats["has system incorrect arg"] = 1
+        if self.has_system_error_extra_arg():
+            self._stats.restart(["summary"])
+            self._stats["has system error extra arg"] = 1
+            if self.has_system_error_incorrect_arg():
+                self._stats.restart(["summary"])
+                self._stats["has system error extra arg and incorrect arg"] = 1
 
     def compare(self, gold, system, erg):
         gold_set = set([k for k in gold._entries.iterkeys()])

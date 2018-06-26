@@ -271,12 +271,26 @@ function update_type_stats(type_str, $stat, $edm) {
     }
 }
 
-function update_stats($stat, $edm) {
-  var type_array = ["gold", "system"];
+function update_stats($stat, $edm, is_summary) {
   var $html = $($edm).find("#all_stats");
+  if (is_summary) {
+    $html.append(
+      $(Templates.stat_entry({name: "Summary",
+          padding: "", stat_class: "",
+          value: $stat.summary["count"]})));
+    var summary_array = ["matched", "has system error", "has system incorrect arg",
+        "has system error extra arg", "has system error extra arg and incorrect arg"];
+    for (var i = 0; i < summary_array.length; i++) {
+      var summary_str = summary_array[i];
+      $html.append(
+        $(Templates.stat_entry({name: summary_str,
+            padding: "&nbsp;&nbsp;", stat_class: "",
+            value: number_and_percentage($stat.summary[summary_str], $stat.summary["count"]) })));
+    }
+  }
+  var type_array = ["gold", "system"];
   for (var i = 0; i < type_array.length; i++) {
     var type_str = type_array[i];
-    console.log(type_str + " " + type_array[i]);
     $html.append(
       $(Templates.stat_entry({name: capitalizeFirstLetter(type_array[i]) + " Only",
           padding: "", stat_class: "",
@@ -398,7 +412,7 @@ function Result(result, parent) {
         var $edm = $(Templates.edm({total: $stat.shared.total,
                                     common: $stat.shared.common})).appendTo($inner);
         self.edm = EDM($edm, self.data.edm);
-        update_stats($stat, $edm);
+        update_stats($stat, $edm, false);
     }
     if (self.data.summary) {
       var $stat = self.data.summary;
@@ -406,7 +420,7 @@ function Result(result, parent) {
                                   common: $stat.shared.common,
                                   predicate: $stat.shared.predicate,
                                   predicate_arg: $stat.predicate_arg})).appendTo($inner);
-      update_stats($stat, $edm);
+      update_stats($stat, $edm, true);
     }
 
 

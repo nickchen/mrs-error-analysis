@@ -458,17 +458,17 @@ class Entry(object):
             self._stats.restart(["system_stats", "format disagreement"])
             self._stats["not connected"] += 1
 
-    def has_system_error(self):
+    def has_predicate_error(self):
         self._stats.restart(["system_stats"])
         return self._stats.has("predicate errors")
 
-    def has_system_error_extra_arg(self):
+    def has_predicate_error_extra_arg(self):
         self._stats.restart(["system_stats"])
         if self._stats.has("predicate errors"):
             return "extra" in self._stats["predicate errors"]
         return False
 
-    def has_system_error_incorrect_arg(self):
+    def has_predicate_error_incorrect_arg(self):
         self._stats.restart(["system_stats"])
         if self._stats.has("predicate errors"):
             return "incorrect" in self._stats["predicate errors"]
@@ -489,18 +489,18 @@ class Entry(object):
         if self.is_matched():
             self._stats.restart(["summary"])
             self._stats["matched"] = 1
-        if self.has_system_error():
+        if self.has_predicate_error():
             self._stats.restart(["summary"])
-            self._stats["has system error"] = 1
-        if self.has_system_error_incorrect_arg():
+            self._stats["has predicate error"] = 1
+        if self.has_predicate_error_incorrect_arg():
             self._stats.restart(["summary"])
-            self._stats["has system incorrect arg"] = 1
-        if self.has_system_error_extra_arg():
+            self._stats["has predicate incorrect arg"] = 1
+        if self.has_predicate_error_extra_arg():
             self._stats.restart(["summary"])
-            self._stats["has system error extra arg"] = 1
-            if self.has_system_error_incorrect_arg():
+            self._stats["has predicate error extra arg"] = 1
+            if self.has_predicate_error_incorrect_arg():
                 self._stats.restart(["summary"])
-                self._stats["has system error extra arg and incorrect arg"] = 1
+                self._stats["has predicate error extra arg and incorrect arg"] = 1
 
     def compare(self, gold, system, erg):
         gold_set = set([k for k in gold._entries.iterkeys()])

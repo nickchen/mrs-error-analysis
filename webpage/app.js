@@ -278,8 +278,8 @@ function update_stats($stat, $edm, is_summary) {
       $(Templates.stat_entry({name: "Summary",
           padding: "", stat_class: "",
           value: $stat.summary["count"]})));
-    var summary_array = ["matched", "has system error", "has system incorrect arg",
-        "has system error extra arg", "has system error extra arg and incorrect arg"];
+    var summary_array = ["matched", "has predicate error", "has predicate incorrect arg",
+        "has predicate error extra arg", "has predicate error extra arg and incorrect arg"];
     for (var i = 0; i < summary_array.length; i++) {
       var summary_str = summary_array[i];
       $html.append(

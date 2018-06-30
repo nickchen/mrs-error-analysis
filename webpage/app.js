@@ -241,7 +241,7 @@ function update_type_stats(type_str, $stat, $edm) {
     }
 
     if ("predicate errors" in $stat) {
-      var error_types = ["incorrect", "extra"];
+      var error_types = ["incorrect", "extra", "missing", "dupping", "skipping"];
       for (var i = 0; i < error_types.length; i++) {
         var error_str = error_types[i];
         if (error_str in $stat["predicate errors"]) {

@@ -17,16 +17,36 @@ from delphin.codecs import simplemrs
 from delphin.mrs import xmrs, eds, penman
 
 class ErgArg(object):
-    def __init__(self, token, arg):
+    # u := top.
+    # i := u
+    # p := u
+    # h := p
+    # e := i
+    # x := i & p.
+    #       u
+    #      / \
+    #     i   p
+    #    / \ / \
+    #   e   x   h
+    hieracy = {
+        "u": ["u", "i", "p", "e", "x", "h"],
+        "i": ["i", "x", "e", "u"],
+        "p": ["p", "x", "h", "u"],
+        "h": ["h", "p", "u"],
+        "e": ["e", "i", "u"],
+        "x": ["x", "i", "p", "u"],
+    }
+    def __init__(self, token, arg, optional=False):
         self._token = token
         self._args = {}
         self.arg = arg
-        self.end = True
+        self.end = False
+        self.optional = optional
         self.rstr = False
         self.level = 0
 
     def copy(self):
-        e = ErgArg(self._token, self.arg)
+        e = ErgArg(self._token, self.arg, self.optional)
         e.level = self.level
         return e
 
@@ -37,6 +57,10 @@ class ErgArg(object):
         arg.level = self.level + 1
         s = "ARG%d" % (self.level)
         assert s == self._token
+        if arg.optional:
+            # if arg being added is optional
+            # mark self as a possible end
+            self.end = True
         if arg.arg in self._args:
             _arg = self._args[arg.arg]
             _arg.sync(arg)
@@ -48,7 +72,8 @@ class ErgArg(object):
         d = self._all if hasattr(self, "_all") else self._args
         for k, v in d.iteritems():
             _args = args[:]
-            _args.append("ARG%d %s" % (v.level, k))
+            _args.append("ARG%d %s%s" % (v.level, k,
+                "*" if v.optional else ""))
             if v.end:
                 yield _args
             for arg in v.get_all_args(_args):
@@ -58,7 +83,8 @@ class ErgArg(object):
         d = self._args
         for k, v in d.iteritems():
             _args = args[:]
-            _args.append("ARG%d %s" % (v.level, k))
+            _args.append("ARG%d %s%s" % (v.level, k,
+                "*" if v.optional else ""))
             if v.end:
                 yield _args
             for arg in v.get_all_args(_args):
@@ -85,6 +111,7 @@ class ErgPredicate(ErgArg):
         def get_args(tokens):
             arg = None
             try:
+                optional = False
                 while True:
                     token = next(tokens)
                     if token.startswith("ARG"):
@@ -92,10 +119,14 @@ class ErgPredicate(ErgArg):
                             token = "ARG0"
                         if arg is not None:
                             yield arg
-                        arg = ErgArg(token, tokens.next())
+                        arg = ErgArg(token, tokens.next(), optional=optional)
                     elif token == "RSTR":
                         arg._rstr = True
                         self._rstr = True
+                    elif token == "[":
+                        optional = True
+                    elif token == "]":
+                        optional = False
             except StopIteration:
                 if arg is not None:
                     yield arg
@@ -110,7 +141,6 @@ class ErgPredicate(ErgArg):
         arg = None
         for i in range(1, len(objs)):
             _obj = objs[i]
-            obj.end = False
             obj.add(_obj)
             obj = _obj
             _arg = _obj.copy()
@@ -122,9 +152,9 @@ class ErgPredicate(ErgArg):
                     self._args[arg.arg] = arg
                 arg = self._args[arg.arg]
             else:
-                arg.end = False
                 arg.add(_arg)
                 arg = _arg
+        obj.end = True
 
     def print_all(self):
         print "%s" % self._predicate
@@ -136,25 +166,36 @@ class ErgPredicate(ErgArg):
         for arg in self.get_args([]):
             print arg
 
+    def get_predicate_arg0(self):
+        return set([a for a in self._all.iterkeys()])
+
 class Erg(object):
     def __init__(self, input):
         self._ergs = defaultdict(ErgPredicate)
         self.parse(input)
 
+    def process_line(self, line):
+        (predicate, args) = line.strip().split(":")
+        predicate = predicate.strip()
+        args = args.strip()
+        self._ergs[predicate].parse_args(predicate, args)
+
     def parse(self, input):
         head = input.next()
         input.next()
         for line in input:
-            (predicate, args) = line.strip().split(":")
-            predicate = predicate.strip()
-            args = args.strip()
-            self._ergs[predicate].parse_args(predicate, args)
+            self.process_line(line)
 
     def __contains__(self, predicate):
         return predicate in self._ergs
 
     def __getitem__(self, predicate):
         return self._ergs[predicate]
+
+    def print_predicate(self, predicate):
+        pred_erg = self.get_predicate(predicate)
+        if pred_erg is not None:
+            pred_erg.print_all()
 
     def get_predicate(self, predicate):
         if predicate in self:
@@ -165,13 +206,21 @@ class Erg(object):
         for item in sorted(self._ergs.itervalues(), key=lambda i: i._predicate):
             item.print_all()
 
-class EdmPredicate(object):
-    def __init__(self, predicate):
-        self.predicate = EdmPredicate.rtrim(predicate, "_rel")
+    def get_predicate_arg0(self, predicate):
+        p = self.get_predicate(predicate)
+        t = set([])
+        if p is not None:
+            t.update(p.get_predicate_arg0())
+        return t
+
+class Predicate(object):
+    def __init__(self, predicate, node=None):
+        self.predicate = Predicate.rtrim(predicate, "_rel")
         self._args = defaultdict(list)
+        self._node = node
 
     def args(self, src_arg, dst_index, dst_pred):
-        self._args[src_arg].append({'src':src_arg, 'index':dst_index, 'predicate':dst_pred})
+        self._args[src_arg].append({"src":src_arg, "index":dst_index, "predicate":dst_pred})
 
     def get_predicate_args(self):
         for key, list_value in self._args.iteritems():
@@ -179,29 +228,18 @@ class EdmPredicate(object):
                 for v in list_value:
                     yield v
 
+    def print_all(self):
+        print self.predicate
+        for k, v in self._args.iteritems():
+            print k, v
+
     @staticmethod
     def rtrim(s, str):
         if s.endswith(str):
             return s[0:(0-len(str))]
         return s
 
-    @staticmethod
-    def get_predictate_types(predicate, erg_dict):
-        ts = []
-        if "_u_" in predicate:
-            ts.append("u")
-            ts.append("e")
-        elif predicate in erg_dict:
-            erg_pred = erg_dict[predicate]
-            for key in erg_pred._all.iterkeys():
-                ts.append(key)
-        return set(ts)
-
-    def get_types(self, erg_dict):
-        """Return all possible types for self, or ARG0"""
-        return EdmPredicate.get_predictate_types(self.predicate, erg_dict)
-
-class EdmPredicateContainer(object):
+class PredicateContainer(object):
     def __init__(self, start, end, sentence, sentence_index):
         self.start  = int(start)
         self.end = int(end)
@@ -212,7 +250,7 @@ class EdmPredicateContainer(object):
         self.carg = []
 
     def append(self, predicate):
-        p = EdmPredicate(predicate)
+        p = Predicate(predicate)
         if p.predicate in self.predicates:
             return
         self.predicates[p.predicate] = p
@@ -221,8 +259,8 @@ class EdmPredicateContainer(object):
         self.carg.append(value)
 
     def arg(self, src_pred, src_arg, dst_index, dst_pred):
-        src_pred = EdmPredicate.rtrim(src_pred, "_rel")
-        dst_pred = EdmPredicate.rtrim(dst_pred, "_rel")
+        src_pred = Predicate.rtrim(src_pred, "_rel")
+        dst_pred = Predicate.rtrim(dst_pred, "_rel")
         if src_pred not in self.predicates:
             assert 0
         self.predicates[src_pred].args(src_arg, dst_index, dst_pred)
@@ -233,13 +271,13 @@ class EdmPredicateContainer(object):
     def parse_arg_level(self, arg_name):
         arg_names = arg_name.split("/")
         if arg_names[0] == "ARG":
-            return "ARG0", 0
+            return "ARG1", 1
         return arg_names[0], int(arg_names[0][3:])
 
     def is_same_span(self, other):
         return self.start == other.start and self.end == other.end
 
-    def args_for_validate(self, predicate):
+    def args_for_validate(self, predicate, erg):
         """find candidate arg for validateion:
                 o ARGX - none self referenced - external reference args
                 o RSTR - self referenced -
@@ -251,10 +289,16 @@ class EdmPredicateContainer(object):
         args = []
         for arg_name, arg_list in po._args.iteritems():
             for arg_dict in arg_list:
-                arg_predicate = arg_dict['predicate']
+                arg_predicate = arg_dict["predicate"]
                 if arg_name.startswith("ARG") and arg_name != "ARG":
                     arg_name, arg_level = self.parse_arg_level(arg_name)
-                    arg = (arg_name, arg_level, arg_predicate.predicate)
+                    p = arg_predicate.predicate
+                    if p.endswith("unknown"):
+                        p = "unknown"
+                    arg_types = erg.get_predicate_arg0(p)
+                    if len(arg_types) == 0:
+                        arg_types = ["u"]
+                    arg = (arg_name, arg_level, p, arg_types)
                     if arg not in args:
                         args.append(arg)
                 elif arg_name.startswith("RSTR"):
@@ -263,98 +307,223 @@ class EdmPredicateContainer(object):
                         args.append(arg)
         return sorted(args, key=lambda arg: (arg[1], arg[0] == "RSTR"))
 
-    def validate_args(self, predicate_str, erg_dict):
-        """Given the erg dictionary, validate the predicate designated by predicate_strself.
-                We have the predicate_str, and erg_dict, but not the predicate arguments.
-                Since we can have multiple predicates for the span, it's not possible to use
-                the EDM information to figure out the predicate and ARG relationship. So
-                we do a bucket instead.
-        """
-        errors = StatsKeeper()
-        pred_erg = erg_dict.get_predicate(predicate_str)
+def validate_predicate_erg_args(predicate_str, args, erg, source=None, debug=True):
+    """Given the erg dictionary, validate the predicate designated by predicate_strself.
+            We have the predicate_str, and erg_dict, but not the predicate arguments.
+            Since we can have multiple predicates for the span, it"s not possible to use
+            the EDM information to figure out the predicate and ARG relationship. So
+            we do a bucket instead.
+    """
+    errors = StatsKeeper()
+    pred_erg = erg.get_predicate(predicate_str)
+    if pred_erg is None:
+        if predicate_str.endswith("unknown"):
+            pred_erg = erg.get_predicate("unknown")
+        else:
+            errors.restart(["system_stats", "not in erg validate"])
+            errors["count"] += 1
+            errors[predicate_str] += 1
+            return errors
 
-        # print "===="
-        # pred_erg.print_all()
-        # pred_erg.print_args()
-        def validate_erg_arg(arg, erg_dict, erg_args, errors):
-            arg_types = EdmPredicate.get_predictate_types(arg[2], erg_dict)
-            if len(erg_args) == 0:
-                assert arg[1] == 1, "first arg"
-                erg_args = [p for p in pred_erg._args.itervalues()]
-            _erg_arg = []
-            for arg_type in arg_types:
-                for erg_arg in erg_args:
-                    if arg_type in erg_arg._args:
-                        _erg_arg.append(erg_arg._args[arg_type])
-            return _erg_arg
+    def get_pred_erg_args_from_prev(prev_args, type_set, level):
+        # using previous matched args and types, retrieve next set of args
+        _args = []
+        _arg_types = []
+        for arg in prev_args:
+            assert arg.level == level, "right level"
+            for k, v in arg._args.iteritems():
+                arg_types = [k]
+                arg_types += ErgArg.hieracy.get(k, [])
+                # print "matching for ARG%s" % (level + 1), type_set, arg_types, predicate_str
+                types_u = set(arg_types) & set(type_set)
+                # fixme - labels "h" using dmrs.hcon
+                if len(types_u) > 0 or k == "h":
+                    # print "matched", k
+                    _args.append(v)
+        return _args
 
-        args = self.args_for_validate(predicate_str)
-        last_index = 0
+    arg_args = filter(lambda a: a[0].startswith("ARG"), args)
+    arg_rstr = filter(lambda a: a[0] == "RSTR", args)
+    last = 0
+    if len(arg_args) == 0:
+        # no args, find non-arg predicate
+        has_end = False
+        for erg_arg in pred_erg._all.itervalues():
+            if erg_arg.end:
+                has_end = True
+        if not has_end:
+            errors.restart(["missing"])
+            errors["count"] += 1
+            errors.restart(["missing", "ARG%s" % (last + 1)])
+            errors[predicate_str] += 1
+            errors["count"] += 1
+    else:
         erg_args = []
         for erg_arg in pred_erg._all.itervalues():
             if not erg_arg.end:
                 erg_args.append(erg_arg)
-        if len(args) == 0:
-            found = False
-            for erg_arg in pred_erg._all.itervalues():
-                if erg_arg.end:
-                    found = True
-            if not found:
-                errors.restart(["missing"])
+        if len(arg_rstr) > 0:
+            if not pred_erg.has_rstr():
+                errors.restart(["extra"])
                 errors["count"] += 1
-                errors.restart(["missing", "ARG%d" % (last_index + 1)])
+                errors.restart(["extra", "RSTR"])
                 errors[predicate_str] += 1
                 errors["count"] += 1
-        else:
-            for arg in args:
-                if arg[0] == "RSTR":
-                    if not pred_erg.has_rstr():
-                        errors.restart(["extra"])
-                        errors["count"] += 1
-                        errors.restart(["extra", "RSTR"])
-                        errors[predicate_str] += 1
-                        errors["count"] += 1
+        erg_args = [a for a in pred_erg._all.itervalues()]
+        prev_args = []
+        _erg_args = []
+        for arg in arg_args:
+            index = last + 1
+            if arg[1] != index:
+                # not expected index
+                if arg[0] in prev_args:
+                    errors.restart(["dupping"])
+                    errors["count"] += 1
+                    errors.restart(["dupping", "%s" % (arg[0])])
+                    errors[predicate_str] += 1
+                    errors["count"] += 1
+                elif arg[1] > index:
+                    # we skipped
+                    errors.restart(["skipping"])
+                    errors["count"] += 1
+                    errors.restart(["skipping", "ARG%d" % (index)])
+                    errors[predicate_str] += 1
+                    errors["count"] += 1
                 else:
-                    if arg[1] != (last_index + 1):
-                        if arg[1] == last_index:
-                            if arg[1] != 0:
-                                errors.restart(["dupping"])
-                                errors["count"] += 1
-                                errors.restart(["dupping", "%s" % (arg[0])])
-                                errors[predicate_str] += 1
-                                errors["count"] += 1
-                        else:
-                            errors.restart(["skipping"])
-                            errors["count"] += 1
-                            errors.restart(["skipping", "ARG%d" % (last_index + 1)])
-                            errors[predicate_str] += 1
-                            errors["count"] += 1
-                            break
-                    else:
-                        _erg_args = []
-                        for erg_arg in erg_args:
-                            if not erg_arg.end:
-                                _erg_args.append(erg_arg)
-                        if len(_erg_args) == 0:
-                            errors.restart(["extra"])
-                            errors["count"] += 1
-                            errors.restart(["extra", arg[0]])
-                            errors[arg[2]] += 1
-                            errors["count"] += 1
-                            break
-                        erg_args = validate_erg_arg(arg, erg_dict, _erg_args, errors)
-                        if len(erg_args) == 0:
-                            # could find matching arg
-                            # incorrect
-                            errors.restart(["incorrect"])
-                            errors["count"] += 1
-                            errors.restart(["incorrect", arg[0]])
-                            errors[arg[2]] += 1
-                            errors["count"] += 1
-                            break
-                    last_index = arg[1]
+                    print source, arg[1], index, arg_args
+                    assert 0
+            else:
+                if len(erg_args) == 0:
+                    # there shouldn't be any args here
+                    errors.restart(["extra"])
+                    errors["count"] += 1
+                    errors.restart(["extra", arg[0]])
+                    errors[arg[2]] += 1
+                    errors["count"] += 1
+                    break
+                # get the types are this level base on previous matched args
+                _erg_args = get_pred_erg_args_from_prev(erg_args, arg[3], last)
+                if len(_erg_args) == 0:
+                    # could find matching arg
+                    # incorrect
+                    errors.restart(["incorrect"])
+                    errors["count"] += 1
+                    errors.restart(["incorrect", arg[0]])
+                    errors[predicate_str] += 1
+                    errors["count"] += 1
+                    if debug:
+                        print predicate_str, "not match", arg
+                    break
+                prev_args.append(arg[0])
+                erg_args = _erg_args
+                last = arg[1]
+        if len(_erg_args) != 0:
+            has_end = False
+            for arg in erg_args:
+                if arg.end:
+                    has_end = True
+            if not has_end:
+                errors.restart(["missing"])
+                errors["count"] += 1
+                errors.restart(["missing", "ARG%s" % (last + 1)])
+                errors[predicate_str] += 1
+                errors["count"] += 1
+    return errors
 
-        return errors
+class AMR(object):
+    def __init__(self, index, _dmrs, erg, debug=False):
+        self.debug = debug
+        self.index = index
+        self._nodes = {}
+        self._connected = True
+        self._well_formed = True
+        if _dmrs is not None:
+            d = _dmrs.to_dict()
+            for node in d.get("nodes", []):
+                nodeid = node.get("nodeid")
+                assert nodeid not in self._nodes
+                self._nodes[nodeid] = Predicate(node.get('predicate'), node=node)
+            for link in d.get("links", []):
+                arg = link.get('rargname')
+                if arg is not None and (arg.startswith("ARG") or arg == "RSTR"):
+                    pred = self._nodes[link["from"]]
+                    dest = self._nodes[link["to"]]
+                    assert pred is not None and dest is not None, "pred dest exists"
+                    pred._args[arg].append({"src": arg,
+                                            "predicate": dest.predicate,
+                                            "types": erg.get_predicate_arg0(dest.predicate)})
+            self._connected = _dmrs.is_connected()
+            if self._connected:
+                try:
+                    self.is_well_formed()
+                except:
+                    self._well_formed = False
+
+    def predicate_index(self):
+        """Generate predicate:from:to index"""
+        for pred in self._nodes.itervalues():
+            yield "%s:%s:%s" % (pred.predicate,
+                                pred._node["lnk"]["from"],
+                                pred._node["lnk"]["to"])
+    def indexes(self):
+        """Generate predicate:from:to index"""
+        for pred in self._nodes.itervalues():
+            yield "%s:%s" % (pred._node["lnk"]["from"],
+                             pred._node["lnk"]["to"])
+
+    def predicates_at(self, start, end):
+        return [pred.predicate for pred in self._nodes.itervalues() if
+            pred._node["lnk"]["from"] == start and pred._node["lnk"]["to"] == end]
+
+    def align(self, align):
+        for pred in self._nodes.itervalues():
+            index = "%s:%s" % (pred._node["lnk"]["from"], pred._node["lnk"]["to"])
+            if index in align:
+                (_from, _to) = align[index].split(":")
+                pred._node["lnk"]["from"] = int(_from)
+                pred._node["lnk"]["to"] = int(_to)
+
+    def validate_predicate_args(self, erg):
+        stats = StatsKeeper()
+        for pred in self._nodes.itervalues():
+            args = []
+            for arg_list in pred._args.itervalues():
+                for arg in arg_list:
+                    arg_level = 0
+                    arg_name = arg["src"]
+                    if arg_name.startswith("ARG") and arg_name != "ARG":
+                        if "-" in arg_name:
+                            arg_name = arg_name.split("-")[0]
+                        arg_level = int(arg_name[3:])
+                    p = arg["predicate"]
+                    if arg_name == "ARG":
+                        arg_level = 1
+                        arg_name = "ARG1"
+                    arg_types = arg["types"]
+                    if p.endswith("unknown"):
+                        p = "unknown"
+                        arg_types = erg.get_predicate_arg0(p)
+                    if len(arg_types) == 0:
+                        arg_types = ["u"]
+                    args.append((arg_name, arg_level, p, arg_types))
+                args = sorted(args, key=lambda arg: (arg[1], arg[0] == "RSTR"))
+            pp = pred.predicate
+            if pp.endswith("unknown"):
+                pp = "unknown"
+            _stats = validate_predicate_erg_args(pp, args, erg,
+                                                 source="amr", debug=self.debug)
+            if _stats.has_error():
+                print "===", self.index, "amr"
+                erg.print_predicate(pp)
+                print args
+                print _stats.to_dict()
+
+                stats.restart(["system_stats"])
+                stats["predicate with incorrect arg"] += 1
+                stats.restart([])
+                stats.merge_node(_stats)
+        return stats
+
 
 class EdmContainer(object):
     def __init__(self, sentence, index):
@@ -373,13 +542,6 @@ class EdmContainer(object):
                 d[index].update(ps)
         return d
 
-    def graph_verify(self):
-        G = nx.Graph()
-        G.add_edges_from(self._edges)
-        print nx.is_connected(G)
-        components = list(nx.connected_components(G))
-        print len(components)
-
     def parse(self, line):
         for item in line.split(";"):
             if len(item.strip()) == 0:
@@ -391,7 +553,7 @@ class EdmContainer(object):
                 (typename, typevalue) = (tokens[1], tokens[2])
                 if index not in self._entries:
                     (start, end) = index.split(":")
-                    self._entries[index] = EdmPredicateContainer(start, end, self._sentence, self._sentence_index)
+                    self._entries[index] = PredicateContainer(start, end, self._sentence, self._sentence_index)
                 if typename == "NAME":
                     self._entries[index].append(typevalue)
                 elif typename == "CARG":
@@ -404,8 +566,8 @@ class EdmContainer(object):
             else:
                 # 156:158 poss ARG1/EQ 163:173 _jetliners/nns_u_unknown_rel
                 (src_pred, src_arg, dst_index, dst_pred) = (tokens[1], tokens[2], tokens[3], tokens[4])
-                src_pred = EdmPredicate.rtrim(src_pred, "_rel")
-                dst_pred = EdmPredicate.rtrim(dst_pred, "_rel")
+                src_pred = Predicate.rtrim(src_pred, "_rel")
+                dst_pred = Predicate.rtrim(dst_pred, "_rel")
 
                 if src_pred not in self._entries[index].predicates and src_pred not in self._entries[dst_index].predicates:
                     assert 0
@@ -438,20 +600,21 @@ class EdmContainer(object):
         for index, predicate_container in self._entries.iteritems():
             for predicate in predicate_container.predicates.itervalues():
                 for arg in predicate.get_predicate_args():
-                    assert arg['index'] in self._entries
-                    assert arg['predicate'] in self._entries[arg['index']].predicates
-                    arg['container'] = self._entries[arg['index']]
-                    arg['predicate'] = self._entries[arg['index']].predicates[arg['predicate']]
+                    assert arg["index"] in self._entries
+                    assert arg["predicate"] in self._entries[arg["index"]].predicates
+                    arg["predicate"] = self._entries[arg["index"]].predicates[arg["predicate"]]
 
     def validate_args(self, index, predicate, erg):
         pc = self._entries[index]
         assert predicate in pc.predicates
-        return pc.validate_args(predicate, erg)
+        args = pc.args_for_validate(predicate, erg)
+        return validate_predicate_erg_args(predicate, args, erg, source="edm")
 
 class StatsKeeper(object):
-    def __init__(self):
+    def __init__(self, title=""):
         self._stats = {}
         self._node = self._stats
+        self.title = title
 
     def push(self, key):
         if key not in self._node:
@@ -479,10 +642,16 @@ class StatsKeeper(object):
         return self._stats
 
     def trim(self, keys, limit=50, count=0, debug=False):
-        self.restart(keys[0:-1])
+        self._node = self._stats
+        for key in keys[0:-1]:
+            if key in self._node:
+                self.push(key)
+            else:
+                return
         # replacement
         last = keys[-1]
-        self._node[last] = self._sort_limit(self._node[last], limit, count, debug=debug)
+        if last in self._node:
+            self._node[last] = self._sort_limit(self._node[last], limit, count, debug=debug)
 
     def _sort_limit(self, node, limit, count, debug=False):
         r = OrderedDict()
@@ -521,16 +690,19 @@ class StatsKeeper(object):
                 StatsKeeper.merge_dict(dst[name], value)
 
 class Entry(object):
-    def __init__(self, index, mrs):
+    def __init__(self, index, mrs, debug=False):
         self.index = index
         self.mrs = mrs
-        self.sentence = mrs['sentence']
+        self.sentence = mrs["sentence"]
         self._gold_edm = None
         self._system_edm = None
         self._edm_compare_result = None
         self._system_amr = None
         self._gold_amr = None
         self._stats = StatsKeeper()
+        self._gold_amr_stats = StatsKeeper()
+        self._system_amr_stats = StatsKeeper()
+        self.debug = debug
 
     def edm_link_args(self):
         self._system_edm.edm_link_args()
@@ -543,24 +715,24 @@ class Entry(object):
         d = {}
         for i, t, val in dmrs.to_triples():
             if i not in d:
-                d[i] = {'predicate': [], 'link': None}
+                d[i] = {"predicate": [], "link": None}
             if t == "predicate":
-                d[i]['predicate'].append(val)
+                d[i]["predicate"].append(val)
             elif t == "lnk":
-                assert d[i]['link'] is None
+                assert d[i]["link"] is None
                 index = val[2:-2]
                 if index in align:
                     index = align[index]
-                d[i]['link'] = index
+                d[i]["link"] = index
         dd = defaultdict(set)
         for i, v in d.iteritems():
-            if v['link'] is not None and len(v['predicate']) > 0:
-                dd[v['link']].update(v['predicate'])
+            if v["link"] is not None and len(v["predicate"]) > 0:
+                dd[v["link"]].update(v["predicate"])
         return dd
 
     def compare_predicates(self):
         if "dmrs" in self._system_amr:
-            amr = self.dmrs_predicate_dict_set(self._system_amr['dmrs'], self._system_edm._align)
+            amr = self.dmrs_predicate_dict_set(self._system_amr["dmrs"], self._system_edm._align)
             edm = self._system_edm.predicate_dict_set()
             amr_keys = set([k for k in amr.iterkeys()])
             edm_keys = set([k for k in edm.iterkeys()])
@@ -579,7 +751,7 @@ class Entry(object):
         # self._system_edm.graph_verify()
         G.add_edges_from(self._system_edm._edges)
         if not nx.is_connected(G):
-            self._stats.restart(["system_stats", "format disagreement"])
+            self._stats.restart(["system_stats"])
             self._stats["not connected"] += 1
 
     def has_predicate_error(self):
@@ -600,12 +772,20 @@ class Entry(object):
 
     def is_matched(self):
         self._stats.restart(["shared"])
-        return self._stats['total'] == self._stats['common']
+        return self._stats["total"] == self._stats["common"]
+
+    def amr_analyze(self, erg):
+        assert self._gold_amr is not None and self._system_amr is not None, "amr parsed"
+        self._gold_amr["amr_obj"] = AMR(self.index, self._gold_amr.get("dmrs"), erg, debug=self.debug)
+        self._system_amr["amr_obj"] = AMR(self.index, self._system_amr.get("dmrs"), erg, debug=self.debug)
+        self._system_amr["amr_obj"].align(self._system_edm._align)
+        self.amr_compare(self._gold_amr["amr_obj"], self._system_amr["amr_obj"], erg, is_gold=True)
+        self.amr_compare(self._gold_amr["amr_obj"], self._system_amr["amr_obj"], erg, is_gold=False)
 
     def edm_analyze(self, erg):
         assert self._gold_edm is not None and self._system_edm is not None, "edm parsed"
         predicates = self.compare(self._gold_edm, self._system_edm, erg)
-        self._edm_compare_result = {'predicates': predicates, 'stats': self._stats.to_dict()}
+        self._edm_compare_result = {"predicates": predicates, "stats": self._stats.to_dict()}
         self.compare_predicates()
         self.edm_graph_verify()
         self._stats.restart(["summary"])
@@ -626,12 +806,86 @@ class Entry(object):
                 self._stats.restart(["summary"])
                 self._stats["has predicate error extra arg and incorrect arg"] = 1
 
+    def amr_compare(self, gold, system, erg, is_gold=False):
+        stats_main = None
+        pred_errors = None
+        if is_gold:
+            stats_main = self._gold_amr_stats
+            pred_errors = gold.validate_predicate_args(erg)
+            prefix = "gold_stats"
+            stats_main.restart([prefix])
+            if pred_errors.has_error():
+                stats_main["predicate with incorrect arg"] += 1
+                stats_main.push("predicate errors")
+                stats_main.merge_node(pred_errors)
+            if not gold._connected:
+                stats_main["not connected"] += 1
+            if not gold._well_formed:
+                stats_main["not well formed"] += 1
+        else:
+            stats_main = self._system_amr_stats
+            pred_errors = system.validate_predicate_args(erg)
+            prefix = "system_stats"
+            stats_main.restart([prefix])
+            if pred_errors.has_error():
+                stats_main["predicate with incorrect arg"] += 1
+                stats_main.push("predicate errors")
+                stats_main.merge_node(pred_errors)
+            if not system._connected:
+                stats_main["not connected"] += 1
+            if not system._well_formed:
+                stats_main["not well formed"] += 1
+
+        gold_set = set([p for p in gold.indexes()])
+        system_set = set([p for p in system.indexes()])
+        for index in list(gold_set | system_set):
+            stats_main.restart(["shared"])
+            (start, end) = index.split(":")
+            start = int(start)
+            end = int(end)
+            gold_index_predicates = set(gold.predicates_at(start, end))
+            system_index_predicates = set(system.predicates_at(start, end))
+            stats_main["total"] += len(system_index_predicates | gold_index_predicates)
+            stats_main["gold"] += len(gold_index_predicates - system_index_predicates)
+            stats_main["system"] += len(system_index_predicates - gold_index_predicates)
+            stats_main["common"] += len(system_index_predicates & gold_index_predicates)
+            def stats_update(prefix, predicates):
+                for predicate in predicates:
+                    stats_main.restart([prefix])
+                    if predicate.endswith("unknown"):
+                        stats_main["unknown"] += 1
+                    else:
+                        stats_main.restart([prefix, "not in other"])
+                        stats_main["total"] += 1
+                        stats_main["surface" if predicate.startswith("_") else "abstract"] += 1
+                        stats_main.restart([prefix, "not in other", "predicates"])
+                        stats_main[predicate] += 1
+
+            stats_update("system_stats", system_index_predicates - gold_index_predicates)
+            stats_update("gold_stats", gold_index_predicates - system_index_predicates)
+            for predicate in system_index_predicates:
+                prefix = "system_stats"
+                stats_main.restart([prefix])
+                if predicate not in erg:
+                    # only count non-unknown
+                    if not predicate.endswith("unknown"):
+                        stats_main.restart([prefix, "not in erg"])
+                        stats_main["count"] += 1
+                        stats_main[predicate] += 1
+            for predicate in gold_index_predicates:
+                prefix = "gold_stats"
+                stats_main.restart([prefix])
+                if predicate not in erg:
+                    # only count non-unknown
+                    if not predicate.endswith("unknown"):
+                        stats_main.restart([prefix, "not in erg"])
+                        stats_main["count"] += 1
+                        stats_main[predicate] += 1
+
     def compare(self, gold, system, erg):
         gold_set = set([k for k in gold._entries.iterkeys()])
         system_set = set([k for k in system._entries.iterkeys()])
         predicates = {}
-        shared_stat_key = "shared"
-        not_in_stat_key = "not in other"
         for index in list(gold_set | system_set):
             self._stats.restart(["shared"])
             pred = gold._entries[index] if index in gold._entries else system._entries[index]
@@ -644,10 +898,10 @@ class Entry(object):
             }
             gold_index_predicates = set(gold._entries[index].predicates) if index in gold_set else set()
             system_index_predicates = set(system._entries[index].predicates) if index in system_set else set()
-            self._stats['total'] += len(system_index_predicates | gold_index_predicates)
-            self._stats['gold'] += len(gold_index_predicates - system_index_predicates)
-            self._stats['system'] += len(system_index_predicates - gold_index_predicates)
-            self._stats['common'] += len(system_index_predicates & gold_index_predicates)
+            self._stats["total"] += len(system_index_predicates | gold_index_predicates)
+            self._stats["gold"] += len(gold_index_predicates - system_index_predicates)
+            self._stats["system"] += len(system_index_predicates - gold_index_predicates)
+            self._stats["common"] += len(system_index_predicates & gold_index_predicates)
             if len(gold_index_predicates) > 0:
                 predicates[index]["predicate"]["gold"] = list(gold_index_predicates)
             if len(system_index_predicates) > 0:
@@ -656,12 +910,12 @@ class Entry(object):
                 for predicate in predicates:
                     self._stats.restart([prefix])
                     if predicate.endswith("unknown"):
-                        self._stats['unknown'] += 1
+                        self._stats["unknown"] += 1
                     else:
-                        self._stats.restart([prefix, not_in_stat_key])
+                        self._stats.restart([prefix, "not in other"])
                         self._stats["total"] += 1
                         self._stats["surface" if predicate.startswith("_") else "abstract"] += 1
-                        self._stats.restart([prefix, not_in_stat_key, "predicates"])
+                        self._stats.restart([prefix, "not in other", "predicates"])
                         self._stats[predicate] += 1
                     if prefix == "system_stats":
                         # for system predicates not in gold, we want to validate
@@ -675,8 +929,9 @@ class Entry(object):
                                 self._stats[predicate] += 1
                         else:
                             pred_errors = self.validate_args(system, index, predicate, erg)
-                            if pred_errors.has_error() > 0:
-                                self._stats['predicate with incorrect arg'] += 1
+                            if pred_errors.has_error():
+                                self._stats.restart([prefix])
+                                self._stats["predicate with incorrect arg"] += 1
                                 self._stats.push("predicate errors")
                                 self._stats.merge_node(pred_errors)
             stats_update("system_stats", system_index_predicates - gold_index_predicates)
@@ -689,33 +944,38 @@ class Entry(object):
             "input" : self.sentence,
             "results" : [],
         }
-        if 'mrs' in self.mrs:
+        if "mrs" in self.mrs:
             result["results"].append(
                 {"result-id": "ACE MRS",
-                 "mrs": xmrs.Mrs.to_dict(self.mrs['mrs'], properties=True)})
+                 "mrs": xmrs.Mrs.to_dict(self.mrs["mrs"], properties=True)})
             readings += 1
-        if 'dmrs' in self._gold_amr:
+        if "dmrs" in self._gold_amr:
             result["results"].append(
                 {"result-id": "Gold DMRS (convert from penman)",
-                 "dmrs": xmrs.Dmrs.to_dict(self._gold_amr['dmrs'], properties=True)})
+                 "dmrs": xmrs.Dmrs.to_dict(self._gold_amr["dmrs"], properties=True)})
             readings += 1
-        if 'dmrs' in self._system_amr:
+        if "dmrs" in self._system_amr:
             result["results"].append(
                 {"result-id": "System DMRS (convert from penman)",
-                 "dmrs": xmrs.Dmrs.to_dict(self._system_amr['dmrs'], properties=True)})
+                 "dmrs": xmrs.Dmrs.to_dict(self._system_amr["dmrs"], properties=True)})
             readings += 1
         if self._gold_edm is not None and self._system_edm is not None:
-            result["results"].append({"result-id": "EDM", "edm": self._edm_compare_result})
+            result["results"].append({"result-id": "EDM Stats", "edm": self._edm_compare_result})
+            readings += 1
+        if self._gold_amr_stats.has_error():
+            result["results"].append({"result-id": "Gold AMR Stats", "amr": self._gold_amr_stats.to_dict()})
+            readings += 1
+        if self._system_amr_stats.has_error():
+            result["results"].append({"result-id": "System AMR Stats", "amr": self._system_amr_stats.to_dict()})
             readings += 1
         result["readings"] = readings
-        return (result, self._stats)
+        return result
 
     def validate_args(self, system, index, predicate, erg):
         # print predicate
         assert erg is not None, "erg defined"
         assert predicate in erg, "predicate in erg"
         return system.validate_args(index, predicate, erg)
-
 
 class Processor(object):
     def __init__(self, argparse_ns):
@@ -764,6 +1024,10 @@ class Processor(object):
         self.entries_edm_align()
         self.entries_edm_analyze()
 
+    def amr_post_process(self):
+        for i in range(len(self.entries)):
+            self.entries[i].amr_analyze(self.erg)
+
     def entries_edm_link_args(self):
         for i in range(len(self.entries)):
             self.entries[i].edm_link_args()
@@ -782,45 +1046,58 @@ class Processor(object):
             self.parse_mrs(self._files["ace"])
         self.parse_edm_gold(self._files["gold_edm"])
         self.parse_edm_system(self._files["system_edm"])
-        self.edm_post_process()
 
-    def load_json(self):
+    def load_amr(self):
         self.parse_mrs(self._files["ace"])
         self.parse_amr_system(self._files["system"])
         self.parse_amr_gold(self._files["gold"])
+
+    def load_json(self):
+        self.load_amr()
         self.load_edm()
+        self.edm_post_process()
+        self.amr_post_process()
 
     def load_erg(self):
         if self.erg is None:
             self.erg = Erg(self._files["erg"])
             self.erg.parse(self._files["abstract"])
+            # self.erg.process_line("")
 
     def to_json(self, indent=2):
-        edm_summary = StatsKeeper()
+        edm_summary = StatsKeeper("EDM Summary")
+        gold_amr_summary = StatsKeeper("AMR Gold Summary")
+        system_amr_summary = StatsKeeper("AMR System Summary")
         for i in range(len(self.entries)):
             entry = self.entries[i]
-            (result, stats) = entry.to_json()
-            edm_summary.merge(stats)
+            result = entry.to_json()
+            edm_summary.merge(entry._stats)
+            gold_amr_summary.merge(entry._gold_amr_stats)
+            system_amr_summary.merge(entry._system_amr_stats)
             file_outpath = os.path.join(self.out_dir, "n%s.json" % i)
             with open(file_outpath, "w") as f:
                 f.write(json.dumps(result, indent=indent))
-        result = {
-            "input" : "",
-            "results" : [],
-        }
-        # python -m SimpleHTTPServer 8000
-        edm_summary.trim(["gold_stats", "not in other", "predicates"])
-        edm_summary.trim(["system_stats", "not in other", "predicates"])
-        edm_summary.trim(["system_stats", "not in erg"], limit=0, count=15)
-        edm_summary.trim(["system_stats", "predicate errors"], limit=0, count=15, debug=True)
-        result["results"].append({"result-id": "Summary", "summary": edm_summary.to_dict()})
-        file_outpath = os.path.join(self.out_dir, "n%s.json" % (len(self.entries)))
-        with open(file_outpath, "w") as f:
-            f.write(json.dumps(result, indent=indent))
+
+        index = len(self.entries)
+        for summary in (edm_summary, gold_amr_summary, system_amr_summary):
+            result = {
+                "input" : "",
+                "results" : [],
+            }
+            # python -m SimpleHTTPServer 8000
+            for prefix in ("gold_stats", "system_stats"):
+                summary.trim([prefix, "not in other", "predicates"])
+                summary.trim([prefix, "not in erg"], limit=0, count=15)
+                summary.trim([prefix, "predicate errors"], limit=0, count=15, debug=True)
+            result["results"].append({"result-id": summary.title, "summary": summary.to_dict()})
+            file_outpath = os.path.join(self.out_dir, "n%s.json" % (index))
+            with open(file_outpath, "w") as f:
+                f.write(json.dumps(result, indent=indent))
+            index += 1
 
     def convert_mrs(self, mrs, properties=True, indent=None):
         if len(mrs) == 1:
-            return {'sentence': mrs[0][len("SKIP: "):]}
+            return {"sentence": mrs[0][len("SKIP: "):]}
         else:
             # CLS = partial(penman.dumps, model=xmrs.Dmrs)
             sent = mrs[0]
@@ -829,7 +1106,7 @@ class Processor(object):
                 x = xs
             else:
                 x = xmrs.Mrs.from_xmrs(xs)
-            return {'sentence': sent[len("SENT: "):], 'mrs': x}
+            return {"sentence": sent[len("SENT: "):], "mrs": x}
 
     def _mrs_file_to_lines(self, input):
         mrs = []
@@ -857,11 +1134,11 @@ class Processor(object):
         try:
             xmrs_obj = self.amr_loads(amr_string.strip())
             x = xmrs.Dmrs.from_xmrs(xmrs_obj)
-            return {'amr': amr_string, 'dmrs':x}
+            return {"amr": amr_string, "dmrs":x}
         except Exception as e:
             traceback.print_exc()
 
-        return {'amr': amr_string}
+        return {"amr": amr_string}
 
     def _parse_amr_file_to_lines(self, input):
         lines = []
@@ -922,47 +1199,47 @@ def process_main_json(ns):
 
 def main(args=sys.argv[1:]):
     parser = argparse.ArgumentParser(prog=sys.argv[0])
-    parser.add_argument('--limit', type=int, default=0)
-    parser.add_argument('--ace', type=argparse.FileType('r'),
+    parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--ace", type=argparse.FileType("r"),
             default="../../error-analysis-data-2/dev.erg.mrs")
     subparsers = parser.add_subparsers()
 
     parser_json = subparsers.add_parser("json")
-    parser_json.add_argument('--system', type=argparse.FileType('r'),
+    parser_json.add_argument("--system", type=argparse.FileType("r"),
             default="../../error-analysis-data-2/dev.system.dmrs.amr.lnk")
-    parser_json.add_argument('--gold', type=argparse.FileType('r'),
+    parser_json.add_argument("--gold", type=argparse.FileType("r"),
             default="../../error-analysis-data-2/dev.gold.dmrs.amr.lnk")
-    parser_json.add_argument('--gold_edm', type=argparse.FileType('r'),
+    parser_json.add_argument("--gold_edm", type=argparse.FileType("r"),
             default="../../error-analysis-data-2/dev.gold.edm.lab")
-    parser_json.add_argument('--system_edm', type=argparse.FileType('r'),
+    parser_json.add_argument("--system_edm", type=argparse.FileType("r"),
             default="../../error-analysis-data-2/dev.system.dmrs.edm.lab")
-    parser_json.add_argument('--out_dir', type=str, default="../webpage/data/")
-    parser_json.add_argument('--erg', type=argparse.FileType('r'),
+    parser_json.add_argument("--out_dir", type=str, default="../webpage/data/")
+    parser_json.add_argument("--erg", type=argparse.FileType("r"),
             default="../../erg1214/etc/surface.smi")
-    parser_json.add_argument('--abstract', type=argparse.FileType('r'),
+    parser_json.add_argument("--abstract", type=argparse.FileType("r"),
             default="../../erg1214/etc/abstract.smi")
     parser_json.set_defaults(func=process_main_json)
 
     parser_error = subparsers.add_parser("error")
-    parser_error.add_argument('--erg', type=argparse.FileType('r'),
+    parser_error.add_argument("--erg", type=argparse.FileType("r"),
             default="../../erg1214/etc/surface.smi")
     parser_error.set_defaults(func=process_main_error)
 
     parser_edm = subparsers.add_parser("edm")
-    parser_edm.add_argument('--gold_edm', type=argparse.FileType('r'),
+    parser_edm.add_argument("--gold_edm", type=argparse.FileType("r"),
             default="../../error-analysis-data-2/dev.gold.edm.lab")
-    parser_edm.add_argument('--system_edm', type=argparse.FileType('r'),
+    parser_edm.add_argument("--system_edm", type=argparse.FileType("r"),
             default="../../error-analysis-data-2/dev.system.dmrs.edm.lab")
-    parser_edm.add_argument('--erg', type=argparse.FileType('r'),
+    parser_edm.add_argument("--erg", type=argparse.FileType("r"),
             default="../../erg1214/etc/surface.smi")
-    parser_edm.add_argument('--abstract', type=argparse.FileType('r'),
+    parser_edm.add_argument("--abstract", type=argparse.FileType("r"),
             default="../../erg1214/etc/abstract.smi")
     parser_edm.set_defaults(func=process_main_edm)
 
     parser_erg = subparsers.add_parser("erg")
-    parser_erg.add_argument('--erg', type=argparse.FileType('r'),
+    parser_erg.add_argument("--erg", type=argparse.FileType("r"),
             default="../../erg1214/etc/surface.smi")
-    parser_erg.add_argument('--abstract', type=argparse.FileType('r'),
+    parser_erg.add_argument("--abstract", type=argparse.FileType("r"),
             default="../../erg1214/etc/abstract.smi")
     parser_erg.set_defaults(func=process_main_erg)
 

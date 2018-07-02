@@ -47,6 +47,16 @@ Templates.edm = [
     '</div>'
 ].join("\n");
 
+Templates.amr = [
+    '<div name="test">',
+      '<div><span class="common">Common</span>/<span class="gold">Gold Only</span>/<span class="system">System Only</span></div>',
+      '<div><table id="all_stats" class="edm edm_table edm_stats">',
+        '<tr><th>Total</th><td class="stats_value"><%= total %></td></tr>',
+        '<tr><th>Common </th><td class="stats_value"><%= common %></td></tr>',
+        '</table></div>',
+    '</div>'
+].join("\n");
+
 Templates.edm_entry = [
     '<tr class="<%=span_class%>">',
       '<td><%= span_start %>:<%= span_end %></td>',
@@ -273,7 +283,7 @@ function update_type_stats(type_str, $stat, $edm) {
 
 function update_stats($stat, $edm, is_summary) {
   var $html = $($edm).find("#all_stats");
-  if (is_summary) {
+  if (is_summary && $stat.summary !== undefined) {
     $html.append(
       $(Templates.stat_entry({name: "Summary",
           padding: "", stat_class: "",
@@ -411,16 +421,23 @@ function Result(result, parent) {
         var $stat = self.data.edm.stats;
         var $edm = $(Templates.edm({total: $stat.shared.total,
                                     common: $stat.shared.common})).appendTo($inner);
-        self.edm = EDM($edm, self.data.edm);
         update_stats($stat, $edm, false);
+    }
+    if (self.data.amr) {
+        var $stat = self.data.amr;
+        console.log($stat);
+        var $view = $(Templates.amr({total: $stat.shared.total,
+                                    common: $stat.shared.common})).appendTo($inner);
+        self.edm = EDM($view, self.data.amr);
+        update_stats($stat, $view, false);
     }
     if (self.data.summary) {
       var $stat = self.data.summary;
-      var $edm = $(Templates.edm({total: $stat.shared.total,
+      var $view = $(Templates.amr({total: $stat.shared.total,
                                   common: $stat.shared.common,
                                   predicate: $stat.shared.predicate,
                                   predicate_arg: $stat.predicate_arg})).appendTo($inner);
-      update_stats($stat, $edm, true);
+      update_stats($stat, $view, true);
     }
 
 
@@ -499,7 +516,7 @@ function doResults(data) {
 }
 
 
-var MAX = 1797;
+var MAX = 1799;
 function updateLinks(index, edm_diff_only) {
   var previous = parseInt(index) - 1;
   var next = parseInt(index) + 1;

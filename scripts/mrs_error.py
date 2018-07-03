@@ -28,10 +28,18 @@ class ErgArg(object):
     #     i   p
     #    / \ / \
     #   e   x   h
-    hieracy = {
+    hieracy_argx = {
         "u": ["u", "i", "p", "e", "x", "h"],
-        "i": ["i", "x", "e", "u"],
-        "p": ["p", "x", "h", "u"],
+        "i": ["i", "x", "e", "p"],
+        "p": ["p", "x", "h", "i"],
+        "h": ["h"],
+        "e": ["e"],
+        "x": ["x"],
+    }
+    hieracy_arg0 = {
+        "u": ["u"],
+        "i": ["i", "e", "x"],
+        "p": ["p", "h", "x"],
         "h": ["h", "p", "u"],
         "e": ["e", "i", "u"],
         "x": ["x", "i", "p", "u"],
@@ -44,6 +52,13 @@ class ErgArg(object):
         self.optional = optional
         self.rstr = False
         self.level = 0
+
+    @staticmethod
+    def hieracy_arg0_get(t):
+        ret = set([])
+        for x in t:
+            ret.update(ErgArg.hieracy_arg0.get(x, []))
+        return ret
 
     def copy(self):
         e = ErgArg(self._token, self.arg, self.optional)
@@ -106,6 +121,8 @@ class ErgPredicate(ErgArg):
         return self._rstr
 
     def parse_args(self, predicate, args):
+        if self._predicate is not None:
+            assert self._predicate == predicate
         self._predicate = predicate
         arg_tokens = iter(re.split("\s|\,|\.", args))
         def get_args(tokens):
@@ -168,6 +185,86 @@ class ErgPredicate(ErgArg):
 
     def get_predicate_arg0(self):
         return set([a for a in self._all.iterkeys()])
+
+    def match_args(self, args, errors, erg):
+        erg_args = [a for a in self._all.itervalues()]
+        last = 0
+        error_found = False
+        for arg in args:
+            index = last + 1
+            if arg[1] != index:
+                # skipped or dup
+                if arg[1] == last:
+                    # dup arg
+                    print "duplicated args, skipping"
+                    errors.restart(["duplicated"])
+                    errors["count"] += 1
+                    errors.restart(["duplicated", arg[0]])
+                    errors[self._predicate] += 1
+                    errors["count"] += 1
+                    continue
+                elif arg[1] > index:
+                    error_found = True
+                    print "advancing to %d from %d" % (arg[1] - 1, last)
+                    erg_args = ErgPredicate.get_level_args_from_list(erg_args, arg[1] - 1)
+                else:
+                    assert 0, "should not possible"
+            if len(erg_args) == 0:
+                error_found = True
+                print "extra", arg
+                errors.restart(["extra"])
+                errors["count"] += 1
+                errors.restart(["extra", arg[0]])
+                errors[self._predicate] += 1
+                errors["count"] += 1
+                break
+            _erg_args = []
+            for erg_arg in erg_args:
+                arg_types = ErgArg.hieracy_arg0_get(arg[3])
+                for k in erg_arg._args.iterkeys():
+                    erg_arg_types = set(ErgArg.hieracy_argx.get(k, []))
+                    arg_union = arg_types & erg_arg_types
+                    print arg_types, erg_arg_types, arg_union
+                    if len(arg_union) > 0 or arg[2] == "unknown":
+                        # matched
+                        print "adding"
+                        _erg_args.append(erg_arg._args[k])
+
+            if len(_erg_args) == 0 and not arg == args[-1]:
+                error_found = True
+                print "incorrect", arg
+                errors.restart(["incorrect"])
+                errors["count"] += 1
+                errors.restart(["incorrect", arg[0]])
+                errors[self._predicate] += 1
+                errors["count"] += 1
+                break
+            erg_arg = _erg_args
+            last = arg[1]
+        if error_found:
+            print "ERROR"
+            self.print_all()
+            print args
+            print errors.to_dict()
+
+    @staticmethod
+    def get_level_args_from_list(args, level):
+        _ret_args = []
+        _args = args
+        while len(_args) > 0 and len(_ret_args) == 0:
+            __args = []
+            for arg in _args:
+                assert arg.level < level
+                for _arg in arg._args.itervalues():
+                    if _arg.level == level:
+                        _ret_args.append(arg)
+                    else:
+                        __args.append(_arg)
+            _args = __args
+        return _ret_args
+
+
+
 
 class Erg(object):
     def __init__(self, input):
@@ -307,6 +404,9 @@ class PredicateContainer(object):
                         args.append(arg)
         return sorted(args, key=lambda arg: (arg[1], arg[0] == "RSTR"))
 
+class ExtraArgument(Exception):
+    pass
+
 def validate_predicate_erg_args(predicate_str, args, erg, source=None, debug=True):
     """Given the erg dictionary, validate the predicate designated by predicate_strself.
             We have the predicate_str, and erg_dict, but not the predicate arguments.
@@ -325,109 +425,19 @@ def validate_predicate_erg_args(predicate_str, args, erg, source=None, debug=Tru
             errors[predicate_str] += 1
             return errors
 
-    def get_pred_erg_args_from_prev(prev_args, type_set, level):
-        # using previous matched args and types, retrieve next set of args
-        _args = []
-        _arg_types = []
-        for arg in prev_args:
-            assert arg.level == level, "right level"
-            for k, v in arg._args.iteritems():
-                arg_types = [k]
-                arg_types += ErgArg.hieracy.get(k, [])
-                # print "matching for ARG%s" % (level + 1), type_set, arg_types, predicate_str
-                types_u = set(arg_types) & set(type_set)
-                # fixme - labels "h" using dmrs.hcon
-                if len(types_u) > 0 or k == "h":
-                    # print "matched", k
-                    _args.append(v)
-        return _args
-
     arg_args = filter(lambda a: a[0].startswith("ARG"), args)
     arg_rstr = filter(lambda a: a[0] == "RSTR", args)
     last = 0
-    if len(arg_args) == 0:
-        # no args, find non-arg predicate
-        has_end = False
-        for erg_arg in pred_erg._all.itervalues():
-            if erg_arg.end:
-                has_end = True
-        if not has_end:
-            errors.restart(["missing"])
+    if len(arg_rstr) > 0:
+        if not pred_erg.has_rstr():
+            errors.restart(["extra"])
             errors["count"] += 1
-            errors.restart(["missing", "ARG%s" % (last + 1)])
+            errors.restart(["extra", "RSTR"])
             errors[predicate_str] += 1
             errors["count"] += 1
-    else:
-        erg_args = []
-        for erg_arg in pred_erg._all.itervalues():
-            if not erg_arg.end:
-                erg_args.append(erg_arg)
-        if len(arg_rstr) > 0:
-            if not pred_erg.has_rstr():
-                errors.restart(["extra"])
-                errors["count"] += 1
-                errors.restart(["extra", "RSTR"])
-                errors[predicate_str] += 1
-                errors["count"] += 1
-        erg_args = [a for a in pred_erg._all.itervalues()]
-        prev_args = []
-        _erg_args = []
-        for arg in arg_args:
-            index = last + 1
-            if arg[1] != index:
-                # not expected index
-                if arg[0] in prev_args:
-                    errors.restart(["dupping"])
-                    errors["count"] += 1
-                    errors.restart(["dupping", "%s" % (arg[0])])
-                    errors[predicate_str] += 1
-                    errors["count"] += 1
-                elif arg[1] > index:
-                    # we skipped
-                    errors.restart(["skipping"])
-                    errors["count"] += 1
-                    errors.restart(["skipping", "ARG%d" % (index)])
-                    errors[predicate_str] += 1
-                    errors["count"] += 1
-                else:
-                    print source, arg[1], index, arg_args
-                    assert 0
-            else:
-                if len(erg_args) == 0:
-                    # there shouldn't be any args here
-                    errors.restart(["extra"])
-                    errors["count"] += 1
-                    errors.restart(["extra", arg[0]])
-                    errors[arg[2]] += 1
-                    errors["count"] += 1
-                    break
-                # get the types are this level base on previous matched args
-                _erg_args = get_pred_erg_args_from_prev(erg_args, arg[3], last)
-                if len(_erg_args) == 0:
-                    # could find matching arg
-                    # incorrect
-                    errors.restart(["incorrect"])
-                    errors["count"] += 1
-                    errors.restart(["incorrect", arg[0]])
-                    errors[predicate_str] += 1
-                    errors["count"] += 1
-                    if debug:
-                        print predicate_str, "not match", arg
-                    break
-                prev_args.append(arg[0])
-                erg_args = _erg_args
-                last = arg[1]
-        if len(_erg_args) != 0:
-            has_end = False
-            for arg in erg_args:
-                if arg.end:
-                    has_end = True
-            if not has_end:
-                errors.restart(["missing"])
-                errors["count"] += 1
-                errors.restart(["missing", "ARG%s" % (last + 1)])
-                errors[predicate_str] += 1
-                errors["count"] += 1
+    if len(arg_args) > 0:
+        pred_erg.match_args(arg_args, errors, erg)
+
     return errors
 
 class AMR(object):
@@ -439,6 +449,7 @@ class AMR(object):
         self._well_formed = True
         if _dmrs is not None:
             d = _dmrs.to_dict()
+            print index, d
             for node in d.get("nodes", []):
                 nodeid = node.get("nodeid")
                 assert nodeid not in self._nodes
@@ -449,15 +460,15 @@ class AMR(object):
                     pred = self._nodes[link["from"]]
                     dest = self._nodes[link["to"]]
                     assert pred is not None and dest is not None, "pred dest exists"
+                    arg_types = erg.get_predicate_arg0(dest.predicate)
+                    if link['post'] == "H":
+                        arg_types.update("h")
                     pred._args[arg].append({"src": arg,
                                             "predicate": dest.predicate,
-                                            "types": erg.get_predicate_arg0(dest.predicate)})
+                                            "types": arg_types})
             self._connected = _dmrs.is_connected()
             if self._connected:
-                try:
-                    self.is_well_formed()
-                except:
-                    self._well_formed = False
+                self._well_formed = _dmrs.is_well_formed()
 
     def predicate_index(self):
         """Generate predicate:from:to index"""
@@ -611,6 +622,8 @@ class EdmContainer(object):
         return validate_predicate_erg_args(predicate, args, erg, source="edm")
 
 class StatsKeeper(object):
+    PREDICATE_ERROR = "predicate error"
+    ARGUMENT_ERROR = "argument error"
     def __init__(self, title=""):
         self._stats = {}
         self._node = self._stats
@@ -756,18 +769,18 @@ class Entry(object):
 
     def has_predicate_error(self):
         self._stats.restart(["system_stats"])
-        return self._stats.has("predicate errors")
+        return self._stats.has(StatsKeeper.PREDICATE_ERROR)
 
     def has_predicate_error_extra_arg(self):
         self._stats.restart(["system_stats"])
-        if self._stats.has("predicate errors"):
-            return "extra" in self._stats["predicate errors"]
+        if self._stats.has(StatsKeeper.PREDICATE_ERROR):
+            return "extra" in self._stats[StatsKeeper.PREDICATE_ERROR]
         return False
 
     def has_predicate_error_incorrect_arg(self):
         self._stats.restart(["system_stats"])
-        if self._stats.has("predicate errors"):
-            return "incorrect" in self._stats["predicate errors"]
+        if self._stats.has(StatsKeeper.PREDICATE_ERROR):
+            return "incorrect" in self._stats[StatsKeeper.PREDICATE_ERROR]
         return False
 
     def is_matched(self):
@@ -813,27 +826,27 @@ class Entry(object):
             stats_main = self._gold_amr_stats
             pred_errors = gold.validate_predicate_args(erg)
             prefix = "gold_stats"
-            stats_main.restart([prefix])
             if pred_errors.has_error():
-                stats_main["predicate with incorrect arg"] += 1
-                stats_main.push("predicate errors")
+                stats_main.restart([prefix, StatsKeeper.ARGUMENT_ERROR])
                 stats_main.merge_node(pred_errors)
             if not gold._connected:
+                stats_main.restart([prefix])
                 stats_main["not connected"] += 1
             if not gold._well_formed:
+                stats_main.restart([prefix])
                 stats_main["not well formed"] += 1
         else:
             stats_main = self._system_amr_stats
             pred_errors = system.validate_predicate_args(erg)
             prefix = "system_stats"
-            stats_main.restart([prefix])
             if pred_errors.has_error():
-                stats_main["predicate with incorrect arg"] += 1
-                stats_main.push("predicate errors")
+                stats_main.restart([prefix, StatsKeeper.ARGUMENT_ERROR])
                 stats_main.merge_node(pred_errors)
             if not system._connected:
+                stats_main.restart([prefix])
                 stats_main["not connected"] += 1
             if not system._well_formed:
+                stats_main.restart([prefix])
                 stats_main["not well formed"] += 1
 
         gold_set = set([p for p in gold.indexes()])
@@ -849,38 +862,35 @@ class Entry(object):
             stats_main["gold"] += len(gold_index_predicates - system_index_predicates)
             stats_main["system"] += len(system_index_predicates - gold_index_predicates)
             stats_main["common"] += len(system_index_predicates & gold_index_predicates)
-            def stats_update(prefix, predicates):
+
+            self.common_stats(stats_main, "system_stats", system_index_predicates - gold_index_predicates)
+            self.common_stats(stats_main, "gold_stats", gold_index_predicates - system_index_predicates)
+            for t in (("system_stats", system_index_predicates), ("gold_stats", gold_index_predicates)):
+                prefix = t[0]
+                predicates = t[1]
                 for predicate in predicates:
                     stats_main.restart([prefix])
-                    if predicate.endswith("unknown"):
-                        stats_main["unknown"] += 1
-                    else:
-                        stats_main.restart([prefix, "not in other"])
-                        stats_main["total"] += 1
-                        stats_main["surface" if predicate.startswith("_") else "abstract"] += 1
-                        stats_main.restart([prefix, "not in other", "predicates"])
-                        stats_main[predicate] += 1
+                    if predicate not in erg:
+                        # only count non-unknown
+                        if not predicate.endswith("unknown"):
+                            stats_main.restart([prefix, StatsKeeper.PREDICATE_ERROR, "not in erg"])
+                            stats_main["count"] += 1
+                            stats_main[predicate] += 1
 
-            stats_update("system_stats", system_index_predicates - gold_index_predicates)
-            stats_update("gold_stats", gold_index_predicates - system_index_predicates)
-            for predicate in system_index_predicates:
-                prefix = "system_stats"
-                stats_main.restart([prefix])
-                if predicate not in erg:
-                    # only count non-unknown
-                    if not predicate.endswith("unknown"):
-                        stats_main.restart([prefix, "not in erg"])
-                        stats_main["count"] += 1
-                        stats_main[predicate] += 1
-            for predicate in gold_index_predicates:
-                prefix = "gold_stats"
-                stats_main.restart([prefix])
-                if predicate not in erg:
-                    # only count non-unknown
-                    if not predicate.endswith("unknown"):
-                        stats_main.restart([prefix, "not in erg"])
-                        stats_main["count"] += 1
-                        stats_main[predicate] += 1
+    def common_stats(self, stats_main, prefix, predicates):
+        for predicate in predicates:
+            stats_main.restart([prefix])
+            if predicate.endswith("unknown"):
+                stats_main["unknown"] += 1
+            else:
+                other = {
+                    "system_stats": "gold",
+                    "gold_stats": "system",
+                }.get(prefix)
+                sname = "not in %s" % (other)
+                stats_main.restart([prefix, StatsKeeper.PREDICATE_ERROR, sname])
+                stats_main["count"] += 1
+                stats_main[predicate] += 1
 
     def compare(self, gold, system, erg):
         gold_set = set([k for k in gold._entries.iterkeys()])
@@ -907,16 +917,8 @@ class Entry(object):
             if len(system_index_predicates) > 0:
                 predicates[index]["predicate"]["system"] = list(system_index_predicates)
             def stats_update(prefix, predicates):
+                self.common_stats(self._stats, prefix, predicates)
                 for predicate in predicates:
-                    self._stats.restart([prefix])
-                    if predicate.endswith("unknown"):
-                        self._stats["unknown"] += 1
-                    else:
-                        self._stats.restart([prefix, "not in other"])
-                        self._stats["total"] += 1
-                        self._stats["surface" if predicate.startswith("_") else "abstract"] += 1
-                        self._stats.restart([prefix, "not in other", "predicates"])
-                        self._stats[predicate] += 1
                     if prefix == "system_stats":
                         # for system predicates not in gold, we want to validate
                         # the argument
@@ -924,15 +926,14 @@ class Entry(object):
                         if predicate not in erg:
                             # only count non-unknown
                             if not predicate.endswith("unknown"):
-                                self._stats.restart([prefix, "not in erg"])
+                                self._stats.restart([prefix, StatsKeeper.PREDICATE_ERROR, "not in erg"])
                                 self._stats["count"] += 1
                                 self._stats[predicate] += 1
                         else:
                             pred_errors = self.validate_args(system, index, predicate, erg)
                             if pred_errors.has_error():
-                                self._stats.restart([prefix])
-                                self._stats["predicate with incorrect arg"] += 1
-                                self._stats.push("predicate errors")
+                                self._stats.restart([prefix, StatsKeeper.ARGUMENT_ERROR])
+                                self._stats["count"] += 1
                                 self._stats.merge_node(pred_errors)
             stats_update("system_stats", system_index_predicates - gold_index_predicates)
             stats_update("gold_stats", gold_index_predicates - system_index_predicates)
@@ -1086,9 +1087,10 @@ class Processor(object):
             }
             # python -m SimpleHTTPServer 8000
             for prefix in ("gold_stats", "system_stats"):
-                summary.trim([prefix, "not in other", "predicates"])
-                summary.trim([prefix, "not in erg"], limit=0, count=15)
-                summary.trim([prefix, "predicate errors"], limit=0, count=15, debug=True)
+                summary.trim([prefix, StatsKeeper.PREDICATE_ERROR, "not in gold"])
+                summary.trim([prefix, StatsKeeper.PREDICATE_ERROR, "not in system"])
+                summary.trim([prefix, StatsKeeper.PREDICATE_ERROR, "not in erg"], limit=0, count=15)
+                summary.trim([prefix, StatsKeeper.ARGUMENT_ERROR], limit=0, count=15, debug=True)
             result["results"].append({"result-id": summary.title, "summary": summary.to_dict()})
             file_outpath = os.path.join(self.out_dir, "n%s.json" % (index))
             with open(file_outpath, "w") as f:

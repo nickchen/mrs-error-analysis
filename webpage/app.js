@@ -197,6 +197,38 @@ function number_and_percentage(value, total) {
   return value;
 }
 
+function update_sub_types($stat, $html, prefix, error_types, stats_class) {
+  $html.append(
+    $(Templates.stat_entry({name: capitalizeFirstLetter(prefix),
+        padding: "&nbsp;&nbsp;", stat_class: stats_class,
+        value: $stat[prefix]["count"]})));
+  for (var i = 0; i < error_types.length; i++) {
+    var error_str = error_types[i];
+    if (error_str in $stat[prefix]) {
+      $html.append(
+        $(Templates.stat_entry({name: capitalizeFirstLetter(error_str),
+            padding: "&nbsp;&nbsp;&nbsp;&nbsp;", stat_class: stats_class,
+            value: $stat[prefix][error_str]["count"]})));
+        var subtotal = $stat[prefix][error_str]["count"];
+        $.each($stat[prefix][error_str], function(name, value) {
+          if (value instanceof Object) {
+            $html.append(
+              $(Templates.stat_entry({name: name,
+                  padding: "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;", stat_class: "",
+                  value: number_and_percentage($stat[prefix][error_str][name]["count"], subtotal)})));
+            $.each(value, function(k, v) {
+              if (k !== "count") {
+                $html.append(
+                  $(Templates.stat_entry({name: k,
+                      padding: "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;", stat_class: "",
+                      value: v})));
+              }
+            });
+          }
+        });
+    }
+  }
+}
 function update_type_stats(type_str, $stat, $edm) {
     var stats_class = type_str + "_row";
     var $html = $($edm).find("#all_stats");
@@ -208,76 +240,26 @@ function update_type_stats(type_str, $stat, $edm) {
               padding: "&nbsp;&nbsp;", stat_class: "", value: value})));
       });
     }
-    if ("not in other" in $stat) {
-      var sub_array = ["surface", "abstract", "total"];
-      for (var i = 0; i < sub_array.length; i++) {
-        var sub_str = sub_array[i];
-        if (sub_str in $stat["not in other"]) {
-          $html.append(
-            $(Templates.stat_entry({name: capitalizeFirstLetter(sub_str),
-                padding: "&nbsp;&nbsp;", stat_class: "",
-                value: number_and_percentage($stat["not in other"][sub_str], $stat["not in other"]["total"]),
-              })));
-        }
+    var stats_type = ["not well formed", "not connected", "unknown"];
+    for (var i = 0; i < stats_type.length; i++) {
+      var stats_type_str = stats_type[i];
+      if (stats_type_str in $stat) {
+        $html.append(
+          $(Templates.stat_entry({name: stats_type_str + " count",
+              padding: "&nbsp;&nbsp;", stat_class: "",
+              value: $stat[stats_type_str]})));
       }
-      if ("predicates" in $stat["not in other"]) {
-        $.each($stat["not in other"]["predicates"], function(name, value) {
-          $html.append(
-            $(Templates.stat_entry({name: name,
-                padding: "|&nbsp;&nbsp;&nbsp;&nbsp;", stat_class: "",
-                value: number_and_percentage(value, $stat["not in other"]["total"])})));
-        });
-      }
-    }
-    if ("unknown" in $stat) {
-      $html.append(
-        $(Templates.stat_entry({name: "Unknown",
-            padding: "&nbsp;&nbsp;", stat_class: "",
-            value: $stat["unknown"]})));
-    }
-    if ("not in erg" in $stat) {
-      $html.append(
-        $(Templates.stat_entry({name: "Not in ERG",
-            padding: "&nbsp;&nbsp;", stat_class: "",
-            value: $stat["not in erg"]["count"]})));
-      $.each($stat["not in erg"], function(name, value) {
-        if (name !== "count") {
-          $html.append(
-            $(Templates.stat_entry({name: name,
-                padding: "&nbsp;&nbsp;&nbsp;&nbsp;", stat_class: "",
-                value: number_and_percentage(value, $stat["not in erg"]["count"])})));
-        }
-      });
     }
 
-    if ("predicate errors" in $stat) {
-      var error_types = ["incorrect", "extra", "missing", "dupping", "skipping"];
-      for (var i = 0; i < error_types.length; i++) {
-        var error_str = error_types[i];
-        if (error_str in $stat["predicate errors"]) {
-          $html.append(
-            $(Templates.stat_entry({name: capitalizeFirstLetter(error_str) + " ARG",
-                padding: "&nbsp;&nbsp;", stat_class: stats_class,
-                value: $stat["predicate errors"][error_str]["count"]})));
-            var subtotal = $stat["predicate errors"][error_str]["count"];
-            $.each($stat["predicate errors"][error_str], function(name, value) {
-              if (value instanceof Object) {
-                $html.append(
-                  $(Templates.stat_entry({name: name,
-                      padding: "&nbsp;&nbsp;&nbsp;&nbsp;", stat_class: "",
-                      value: number_and_percentage($stat["predicate errors"][error_str][name]["count"], subtotal)})));
-                $.each(value, function(k, v) {
-                  if (k !== "count") {
-                    $html.append(
-                      $(Templates.stat_entry({name: k,
-                          padding: "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;", stat_class: "",
-                          value: v})));
-                  }
-                });
-              }
-            });
-        }
-      }
+    if ("predicate error" in $stat) {
+      var prefix = "predicate error";
+      var error_types = ["not in gold", "not in system", "not in erg"];
+      update_sub_types($stat, $html, prefix, error_types, stats_class);
+    }
+    if ("argument error" in $stat) {
+      var prefix = "argument error";
+      var error_types = ["incorrect", "extra", "duplicated"];
+      update_sub_types($stat, $html, prefix, error_types, stats_class);
     }
 }
 
@@ -292,10 +274,12 @@ function update_stats($stat, $edm, is_summary) {
         "has predicate error extra arg", "has predicate error extra arg and incorrect arg"];
     for (var i = 0; i < summary_array.length; i++) {
       var summary_str = summary_array[i];
-      $html.append(
-        $(Templates.stat_entry({name: summary_str,
-            padding: "&nbsp;&nbsp;", stat_class: "",
-            value: number_and_percentage($stat.summary[summary_str], $stat.summary["count"]) })));
+      if (summary_str in $stat.summary) {
+        $html.append(
+          $(Templates.stat_entry({name: summary_str,
+              padding: "&nbsp;&nbsp;", stat_class: "",
+              value: number_and_percentage($stat.summary[summary_str], $stat.summary["count"]) })));
+      }
     }
   }
   var type_array = ["gold", "system"];

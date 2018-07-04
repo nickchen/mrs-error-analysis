@@ -407,7 +407,7 @@ class PredicateContainer(object):
 class ExtraArgument(Exception):
     pass
 
-def validate_predicate_erg_args(predicate_str, args, erg, source=None, debug=True):
+def validate_predicate_erg_args(prefix, pred_erg, args, erg, source=None, debug=True):
     """Given the erg dictionary, validate the predicate designated by predicate_strself.
             We have the predicate_str, and erg_dict, but not the predicate arguments.
             Since we can have multiple predicates for the span, it"s not possible to use
@@ -415,16 +415,6 @@ def validate_predicate_erg_args(predicate_str, args, erg, source=None, debug=Tru
             we do a bucket instead.
     """
     errors = StatsKeeper()
-    pred_erg = erg.get_predicate(predicate_str)
-    if pred_erg is None:
-        if predicate_str.endswith("unknown"):
-            pred_erg = erg.get_predicate("unknown")
-        else:
-            errors.restart(["system_stats", "not in erg validate"])
-            errors["count"] += 1
-            errors[predicate_str] += 1
-            return errors
-
     arg_args = filter(lambda a: a[0].startswith("ARG"), args)
     arg_rstr = filter(lambda a: a[0] == "RSTR", args)
     last = 0
@@ -433,7 +423,7 @@ def validate_predicate_erg_args(predicate_str, args, erg, source=None, debug=Tru
             errors.restart(["extra"])
             errors["count"] += 1
             errors.restart(["extra", "RSTR"])
-            errors[predicate_str] += 1
+            errors[pred_erg._predicate] += 1
             errors["count"] += 1
     if len(arg_args) > 0:
         pred_erg.match_args(arg_args, errors, erg)
@@ -494,7 +484,7 @@ class AMR(object):
                 pred._node["lnk"]["from"] = int(_from)
                 pred._node["lnk"]["to"] = int(_to)
 
-    def validate_predicate_args(self, erg):
+    def validate_predicate_args(self, prefix, stats_main, erg):
         stats = StatsKeeper()
         for pred in self._nodes.itervalues():
             args = []
@@ -521,16 +511,19 @@ class AMR(object):
             pp = pred.predicate
             if pp.endswith("unknown"):
                 pp = "unknown"
-            _stats = validate_predicate_erg_args(pp, args, erg,
+            pred_erg = erg.get_predicate(pp)
+            if pred_erg is None:
+                stats_main.restart([prefix, StatsKeeper.PREDICATE_ERROR, "not in erg"])
+                stats_main["count"] += 1
+                stats_main[pp] += 1
+                continue
+            _stats = validate_predicate_erg_args(prefix, pred_erg, args, erg,
                                                  source="amr", debug=self.debug)
             if _stats.has_error():
                 print "===", self.index, "amr"
                 erg.print_predicate(pp)
                 print args
                 print _stats.to_dict()
-
-                stats.restart(["system_stats"])
-                stats["predicate with incorrect arg"] += 1
                 stats.restart([])
                 stats.merge_node(_stats)
         return stats
@@ -615,11 +608,20 @@ class EdmContainer(object):
                     assert arg["predicate"] in self._entries[arg["index"]].predicates
                     arg["predicate"] = self._entries[arg["index"]].predicates[arg["predicate"]]
 
-    def validate_args(self, index, predicate, erg):
+    def validate_args(self, prefix, index, predicate, erg, stats_main):
         pc = self._entries[index]
         assert predicate in pc.predicates
         args = pc.args_for_validate(predicate, erg)
-        return validate_predicate_erg_args(predicate, args, erg, source="edm")
+
+        if predicate.endswith("unknown"):
+            predicate = "unknown"
+        pred_erg = erg.get_predicate(predicate)
+        if pred_erg is None:
+            stats_main.restart([prefix, StatsKeeper.PREDICATE_ERROR, "not in erg"])
+            stats_main["count"] += 1
+            stats_main[predicate_str] += 1
+            return
+        return validate_predicate_erg_args(prefix, pred_erg, args, erg, source="edm")
 
 class StatsKeeper(object):
     PREDICATE_ERROR = "predicate error"
@@ -824,8 +826,8 @@ class Entry(object):
         pred_errors = None
         if is_gold:
             stats_main = self._gold_amr_stats
-            pred_errors = gold.validate_predicate_args(erg)
             prefix = "gold_stats"
+            pred_errors = gold.validate_predicate_args(prefix, stats_main, erg)
             if pred_errors.has_error():
                 stats_main.restart([prefix, StatsKeeper.ARGUMENT_ERROR])
                 stats_main.merge_node(pred_errors)
@@ -837,8 +839,8 @@ class Entry(object):
                 stats_main["not well formed"] += 1
         else:
             stats_main = self._system_amr_stats
-            pred_errors = system.validate_predicate_args(erg)
             prefix = "system_stats"
+            pred_errors = system.validate_predicate_args(prefix, stats_main, erg)
             if pred_errors.has_error():
                 stats_main.restart([prefix, StatsKeeper.ARGUMENT_ERROR])
                 stats_main.merge_node(pred_errors)
@@ -879,8 +881,8 @@ class Entry(object):
 
     def common_stats(self, stats_main, prefix, predicates):
         for predicate in predicates:
-            stats_main.restart([prefix])
             if predicate.endswith("unknown"):
+                stats_main.restart([prefix])
                 stats_main["unknown"] += 1
             else:
                 other = {
@@ -930,7 +932,7 @@ class Entry(object):
                                 self._stats["count"] += 1
                                 self._stats[predicate] += 1
                         else:
-                            pred_errors = self.validate_args(system, index, predicate, erg)
+                            pred_errors = system.validate_args(prefix, index, predicate, erg, self._stats)
                             if pred_errors.has_error():
                                 self._stats.restart([prefix, StatsKeeper.ARGUMENT_ERROR])
                                 self._stats["count"] += 1
@@ -971,12 +973,6 @@ class Entry(object):
             readings += 1
         result["readings"] = readings
         return result
-
-    def validate_args(self, system, index, predicate, erg):
-        # print predicate
-        assert erg is not None, "erg defined"
-        assert predicate in erg, "predicate in erg"
-        return system.validate_args(index, predicate, erg)
 
 class Processor(object):
     def __init__(self, argparse_ns):

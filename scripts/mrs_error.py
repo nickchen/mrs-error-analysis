@@ -110,7 +110,8 @@ class ErgArg(object):
         for arg in self.get_args([]):
             print arg
 
-class ErgPredicate(ErgArg):
+
+class PredicateErg(ErgArg):
     def __init__(self):
         self._args = {}             # including ARG0
         self._all = {}
@@ -196,7 +197,6 @@ class ErgPredicate(ErgArg):
                 # skipped or dup
                 if arg[1] == last:
                     # dup arg
-                    print "duplicated args, skipping"
                     errors.restart(["duplicated"])
                     errors["count"] += 1
                     errors.restart(["duplicated", arg[0]])
@@ -205,13 +205,11 @@ class ErgPredicate(ErgArg):
                     continue
                 elif arg[1] > index:
                     error_found = True
-                    print "advancing to %d from %d" % (arg[1] - 1, last)
-                    erg_args = ErgPredicate.get_level_args_from_list(erg_args, arg[1] - 1)
+                    erg_args = PredicateErg.get_level_args_from_list(erg_args, arg[1] - 1)
                 else:
                     assert 0, "should not possible"
             if len(erg_args) == 0:
                 error_found = True
-                print "extra", arg
                 errors.restart(["extra"])
                 errors["count"] += 1
                 errors.restart(["extra", arg[0]])
@@ -224,28 +222,28 @@ class ErgPredicate(ErgArg):
                 for k in erg_arg._args.iterkeys():
                     erg_arg_types = set(ErgArg.hieracy_argx.get(k, []))
                     arg_union = arg_types & erg_arg_types
-                    print arg_types, erg_arg_types, arg_union
                     if len(arg_union) > 0 or arg[2] == "unknown":
                         # matched
-                        print "adding"
-                        _erg_args.append(erg_arg._args[k])
+                            _erg_args.append(erg_arg._args[k])
 
             if len(_erg_args) == 0 and not arg == args[-1]:
                 error_found = True
-                print "incorrect", arg
                 errors.restart(["incorrect"])
                 errors["count"] += 1
                 errors.restart(["incorrect", arg[0]])
                 errors[self._predicate] += 1
                 errors["count"] += 1
                 break
+            # else:
+            #     errors.restart(["correct"])
+            #     errors["count"] += 1
+            #     errors.restart(["correct", arg[0]])
+            #     errors[self._predicate] += 1
+            #     errors["count"] += 1
             erg_arg = _erg_args
             last = arg[1]
         if error_found:
-            print "ERROR"
-            self.print_all()
-            print args
-            print errors.to_dict()
+            pass
 
     @staticmethod
     def get_level_args_from_list(args, level):
@@ -268,7 +266,7 @@ class ErgPredicate(ErgArg):
 
 class Erg(object):
     def __init__(self, input):
-        self._ergs = defaultdict(ErgPredicate)
+        self._ergs = defaultdict(PredicateErg)
         self.parse(input)
 
     def process_line(self, line):
@@ -439,7 +437,6 @@ class AMR(object):
         self._well_formed = True
         if _dmrs is not None:
             d = _dmrs.to_dict()
-            print index, d
             for node in d.get("nodes", []):
                 nodeid = node.get("nodeid")
                 assert nodeid not in self._nodes
@@ -463,9 +460,9 @@ class AMR(object):
     def predicate_index(self):
         """Generate predicate:from:to index"""
         for pred in self._nodes.itervalues():
-            yield "%s:%s:%s" % (pred.predicate,
-                                pred._node["lnk"]["from"],
+            yield pred.predicate, "%s:%s" % (pred._node["lnk"]["from"],
                                 pred._node["lnk"]["to"])
+
     def indexes(self):
         """Generate predicate:from:to index"""
         for pred in self._nodes.itervalues():
@@ -520,10 +517,6 @@ class AMR(object):
             _stats = validate_predicate_erg_args(prefix, pred_erg, args, erg,
                                                  source="amr", debug=self.debug)
             if _stats.has_error():
-                print "===", self.index, "amr"
-                erg.print_predicate(pp)
-                print args
-                print _stats.to_dict()
                 stats.restart([])
                 stats.merge_node(_stats)
         return stats
@@ -624,8 +617,8 @@ class EdmContainer(object):
         return validate_predicate_erg_args(prefix, pred_erg, args, erg, source="edm")
 
 class StatsKeeper(object):
-    PREDICATE_ERROR = "predicate error"
-    ARGUMENT_ERROR = "argument error"
+    PREDICATE_ERROR = "predicate stat"
+    ARGUMENT_ERROR = "argument stat"
     def __init__(self, title=""):
         self._stats = {}
         self._node = self._stats
@@ -668,6 +661,18 @@ class StatsKeeper(object):
         if last in self._node:
             self._node[last] = self._sort_limit(self._node[last], limit, count, debug=debug)
 
+    def sort_trim_f1(self):
+        self.restart(["system_stats", self.PREDICATE_ERROR])
+        r = OrderedDict()
+        o = self._node["f1"]
+        for pred, d in sorted(o.iteritems(), key=lambda v: (1.0-v[1]["f1"], v[1]["count"]), reverse=True):
+            if d["count"] == 0 or d["f1"] == 0.0:
+                continue
+            r[pred] = d
+            if len(r) >= 15:
+                break
+        self._node["f1"] = r
+
     def _sort_limit(self, node, limit, count, debug=False):
         r = OrderedDict()
         def sort_func(k):
@@ -704,6 +709,63 @@ class StatsKeeper(object):
                     dst[name] = defaultdict(int)
                 StatsKeeper.merge_dict(dst[name], value)
 
+class PredicateAccounting(object):
+    def __init__(self):
+        self._account = defaultdict(lambda: {"tp":0, "fp":0, "fn":0,
+                                             "system_count":0,
+                                             "gold_count":0})
+
+    def account(self, system, gold, erg):
+        system_pred_set = defaultdict(set)
+        gold_pred_set = defaultdict(set)
+        for pred, index in system.predicate_index():
+            system_pred_set[pred].update(index)
+        for pred, index in gold.predicate_index():
+            gold_pred_set[pred].update(index)
+        system_preds = set([p for p in system_pred_set.iterkeys()])
+        gold_preds = set([p for p in gold_pred_set.iterkeys()])
+        for pred in (system_preds | gold_preds):
+            # only count non-unknown
+            if pred not in erg or pred.endswith("unknown"):
+                continue
+            correct_set = system_pred_set[pred] & gold_pred_set[pred]
+            self._account[pred]["tp"] = len(correct_set)
+            self._account[pred]["fp"] = len(system_pred_set[pred] - correct_set)
+            self._account[pred]["fn"] = len(gold_pred_set[pred] - correct_set)
+            self._account[pred]["system_count"] = len(system_pred_set[pred])
+            self._account[pred]["gold_count"] = len(gold_pred_set[pred])
+
+            t = self._account[pred]["tp"] + self._account[pred]["fp"] + self._account[pred]["fn"]
+
+    def merge(self, other):
+        for pred, account in other._account.iteritems():
+            self._account[pred]["tp"] += account["tp"]
+            self._account[pred]["fp"] += account["fp"]
+            self._account[pred]["fn"] += account["fn"]
+            self._account[pred]["system_count"] += account["system_count"]
+            self._account[pred]["gold_count"] += account["gold_count"]
+
+    def calculate_f1(self):
+        for pred, account in self._account.iteritems():
+            if (account["tp"] + account["fp"]) == 0 or (account["tp"] + account["fn"]) == 0:
+                account["f1"] = 0.0
+            else:
+                precision = float(account["tp"])/float(account["tp"] + account["fp"])
+                recall = float(account["tp"])/float(account["tp"] + account["fn"])
+                if (recall + precision) == 0:
+                    account["f1"] = 0.0
+                else:
+                    f1 = 2*(recall * precision) / (recall + precision)
+                    account["precision"] = precision
+                    account["recall"] = recall
+                    account["f1"] = f1
+
+    def add_to_stat(self, prefixes, stats):
+        self.calculate_f1()
+        stats.restart(prefixes)
+        for pred, account in self._account.iteritems():
+            stats[pred] = {"f1": account["f1"], "count": account["system_count"]}
+
 class Entry(object):
     def __init__(self, index, mrs, debug=False):
         self.index = index
@@ -718,6 +780,7 @@ class Entry(object):
         self._gold_amr_stats = StatsKeeper()
         self._system_amr_stats = StatsKeeper()
         self.debug = debug
+        self._f1 = PredicateAccounting()
 
     def edm_link_args(self):
         self._system_edm.edm_link_args()
@@ -773,10 +836,10 @@ class Entry(object):
         self._stats.restart(["system_stats"])
         return self._stats.has(StatsKeeper.PREDICATE_ERROR)
 
-    def has_predicate_error_extra_arg(self):
+    def has_argument_error_extra_arg(self):
         self._stats.restart(["system_stats"])
-        if self._stats.has(StatsKeeper.PREDICATE_ERROR):
-            return "extra" in self._stats[StatsKeeper.PREDICATE_ERROR]
+        if self._stats.has(StatsKeeper.ARGUMENT_ERROR):
+            return "extra" in self._stats[StatsKeeper.ARGUMENT_ERROR]
         return False
 
     def has_predicate_error_incorrect_arg(self):
@@ -811,15 +874,6 @@ class Entry(object):
         if self.has_predicate_error():
             self._stats.restart(["summary"])
             self._stats["has predicate error"] = 1
-        if self.has_predicate_error_incorrect_arg():
-            self._stats.restart(["summary"])
-            self._stats["has predicate incorrect arg"] = 1
-        if self.has_predicate_error_extra_arg():
-            self._stats.restart(["summary"])
-            self._stats["has predicate error extra arg"] = 1
-            if self.has_predicate_error_incorrect_arg():
-                self._stats.restart(["summary"])
-                self._stats["has predicate error extra arg and incorrect arg"] = 1
 
     def amr_compare(self, gold, system, erg, is_gold=False):
         stats_main = None
@@ -850,6 +904,7 @@ class Entry(object):
             if not system._well_formed:
                 stats_main.restart([prefix])
                 stats_main["not well formed"] += 1
+            self._f1.account(system, gold, erg)
 
         gold_set = set([p for p in gold.indexes()])
         system_set = set([p for p in system.indexes()])
@@ -871,7 +926,6 @@ class Entry(object):
                 prefix = t[0]
                 predicates = t[1]
                 for predicate in predicates:
-                    stats_main.restart([prefix])
                     if predicate not in erg:
                         # only count non-unknown
                         if not predicate.endswith("unknown"):
@@ -889,6 +943,8 @@ class Entry(object):
                     "system_stats": "gold",
                     "gold_stats": "system",
                 }.get(prefix)
+                # not in system
+                # not in gold
                 sname = "not in %s" % (other)
                 stats_main.restart([prefix, StatsKeeper.PREDICATE_ERROR, sname])
                 stats_main["count"] += 1
@@ -1063,20 +1119,27 @@ class Processor(object):
 
     def to_json(self, indent=2):
         edm_summary = StatsKeeper("EDM Summary")
+        edm_summary_no_extra_arg = StatsKeeper("EDM Summary (no extra arg)")
         gold_amr_summary = StatsKeeper("AMR Gold Summary")
         system_amr_summary = StatsKeeper("AMR System Summary")
+        f1_summary = PredicateAccounting()
         for i in range(len(self.entries)):
             entry = self.entries[i]
             result = entry.to_json()
             edm_summary.merge(entry._stats)
+            if not entry.has_argument_error_extra_arg():
+                edm_summary_no_extra_arg.merge(entry._stats)
             gold_amr_summary.merge(entry._gold_amr_stats)
             system_amr_summary.merge(entry._system_amr_stats)
+            f1_summary.merge(entry._f1)
             file_outpath = os.path.join(self.out_dir, "n%s.json" % i)
             with open(file_outpath, "w") as f:
                 f.write(json.dumps(result, indent=indent))
 
+        f1_summary.add_to_stat(["system_stats", StatsKeeper.PREDICATE_ERROR, "f1"], system_amr_summary)
+        system_amr_summary.sort_trim_f1()
         index = len(self.entries)
-        for summary in (edm_summary, gold_amr_summary, system_amr_summary):
+        for summary in (edm_summary, edm_summary_no_extra_arg, gold_amr_summary, system_amr_summary):
             result = {
                 "input" : "",
                 "results" : [],

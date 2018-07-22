@@ -197,6 +197,11 @@ function number_and_percentage(value, total) {
   return value;
 }
 
+function number_and_percentage_tuple(perc, count) {
+  var precentage = ((perc) * 100).toFixed(2) + '%';
+  return "(" + precentage + ") " + count;
+}
+
 function update_sub_types($stat, $html, prefix, error_types, stats_class) {
   $html.append(
     $(Templates.stat_entry({name: capitalizeFirstLetter(prefix),
@@ -209,9 +214,16 @@ function update_sub_types($stat, $html, prefix, error_types, stats_class) {
         $(Templates.stat_entry({name: capitalizeFirstLetter(error_str),
             padding: "&nbsp;&nbsp;&nbsp;&nbsp;", stat_class: stats_class,
             value: $stat[prefix][error_str]["count"]})));
+
         var subtotal = $stat[prefix][error_str]["count"];
         $.each($stat[prefix][error_str], function(name, value) {
-          if (value instanceof Object) {
+          // console.log(name);
+          if (error_str === "f1") {
+            $html.append(
+              $(Templates.stat_entry({name: name,
+                  padding: "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;", stat_class: "",
+                  value: number_and_percentage_tuple(value["f1"], value["count"])})));
+          } else if (value instanceof Object) {
             $html.append(
               $(Templates.stat_entry({name: name,
                   padding: "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;", stat_class: "",
@@ -224,6 +236,11 @@ function update_sub_types($stat, $html, prefix, error_types, stats_class) {
                       value: v})));
               }
             });
+          } else {
+            $html.append(
+              $(Templates.stat_entry({name: name,
+                  padding: "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;", stat_class: "",
+                  value: number_and_percentage(value, subtotal)})));
           }
         });
     }
@@ -251,13 +268,13 @@ function update_type_stats(type_str, $stat, $edm) {
       }
     }
 
-    if ("predicate error" in $stat) {
-      var prefix = "predicate error";
-      var error_types = ["not in gold", "not in system", "not in erg"];
+    if ("predicate stat" in $stat) {
+      var prefix = "predicate stat";
+      var error_types = ["not in gold", "not in system", "not in erg", "f1"];
       update_sub_types($stat, $html, prefix, error_types, stats_class);
     }
-    if ("argument error" in $stat) {
-      var prefix = "argument error";
+    if ("argument stat" in $stat) {
+      var prefix = "argument stat";
       var error_types = ["incorrect", "extra", "duplicated"];
       update_sub_types($stat, $html, prefix, error_types, stats_class);
     }
@@ -288,7 +305,7 @@ function update_stats($stat, $edm, is_summary) {
     $html.append(
       $(Templates.stat_entry({name: capitalizeFirstLetter(type_array[i]) + " Only",
           padding: "", stat_class: "",
-          value: $stat.shared[type_str]})));
+          value: number_and_percentage($stat.shared[type_str], $stat.shared["total"])})));
     var type_stat = $stat[type_str + "_stats"];
     if (type_stat !== undefined) {
       update_type_stats(type_str, type_stat, $edm);
@@ -409,7 +426,6 @@ function Result(result, parent) {
     }
     if (self.data.amr) {
         var $stat = self.data.amr;
-        console.log($stat);
         var $view = $(Templates.amr({total: $stat.shared.total,
                                     common: $stat.shared.common})).appendTo($inner);
         self.edm = EDM($view, self.data.amr);
@@ -500,7 +516,7 @@ function doResults(data) {
 }
 
 
-var MAX = 1799;
+var MAX = 1800;
 function updateLinks(index, edm_diff_only) {
   var previous = parseInt(index) - 1;
   var next = parseInt(index) + 1;

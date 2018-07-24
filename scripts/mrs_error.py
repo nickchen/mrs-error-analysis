@@ -234,12 +234,6 @@ class PredicateErg(ErgArg):
                 errors[self._predicate] += 1
                 errors["count"] += 1
                 break
-            # else:
-            #     errors.restart(["correct"])
-            #     errors["count"] += 1
-            #     errors.restart(["correct", arg[0]])
-            #     errors[self._predicate] += 1
-            #     errors["count"] += 1
             erg_arg = _erg_args
             last = arg[1]
         if error_found:
@@ -1031,6 +1025,9 @@ class Entry(object):
         return result
 
 class Processor(object):
+    """Basic runner for the analysis project. Handle the parsing of the arguments,
+            and the conversion of resulting data into JSON format (to_json)
+    """
     def __init__(self, argparse_ns):
         self.__package_amr_loads = partial(penman.loads, model=xmrs.Dmrs)
         self.entries = []
@@ -1041,6 +1038,8 @@ class Processor(object):
         self.amr_loads = self._local_amr_loads
         if hasattr(argparse_ns, "out_dir"):
             self.out_dir = argparse_ns.out_dir
+        # convert provided argparse_ns file handles into their respective
+        # dictionary
         for f in ("ace", "system", "gold", "erg", "system_edm", "gold_edm", "abstract"):
             if hasattr(argparse_ns, f):
                 self._files[f] = getattr(argparse_ns, f)

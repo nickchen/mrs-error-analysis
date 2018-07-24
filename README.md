@@ -17,3 +17,18 @@ Project to satisfy the graduation requirement for CLMS at University of Washingt
 
 * [Delphin-Viz] https://github.com/delph-in/delphin-viz
 * [Bootstrap] http://getbootstrap.com
+
+## Options
+
+### Local Site
+```
+python -m SimpleHTTPServer 8000
+```
+
+### limit option for debug
+
+Limit the parse entries for quick debugging.
+
+```
+ ./mrs_error.py --limit 10 json
+```
